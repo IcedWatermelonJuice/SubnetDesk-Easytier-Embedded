@@ -1820,8 +1820,10 @@ pub fn main_device_name(name: String) {
 }
 
 pub fn main_remove_peer(id: String) {
-    PeerConfig::remove(&id);
-    LocalConfig::remove_recent_lan_endpoint(&id);
+    if let Err(error) = crate::lan_devices::remove_recent(&id) {
+        log::error!("Failed to remove recent device: {error}");
+    }
+    main_load_recent_peers();
 }
 
 pub fn main_has_hwcodec() -> SyncReturn<bool> {

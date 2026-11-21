@@ -603,6 +603,11 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
             peer.mark_missed(now);
         }
     }
+    // 在清理发现缓存之前同步最近列表，以保留移除状态及重新发现的依据。
+    match crate::lan_devices::observe_discovery(&peers, now) {
+        Ok(()) => peers.retain(|peer| !crate::lan_cleanup::expired(peer.online_state(now), peer.last_seen, now)),
+        Err(error) => log::error!("Failed to update recent device visibility: {error}"),
+    }
     config::LanPeers::store(&peers);
     publish_discovery();
     Ok(())
