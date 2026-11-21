@@ -49,6 +49,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
   int _page = 0;
   String t(String zh, String en) => subnetText(context, zh, en);
   bool get favorites => widget.source == 1;
+  bool get easyTier => widget.source == easyTierDeviceSource && widget.easyTier != null;
   String groupName(String? id) => id == null
       ? t('全部收藏', 'All favorites')
       : id == favoriteUngroupedId
@@ -67,7 +68,9 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
       .length;
   List<WorkspaceDevice> get scoped {
     final map = <String, WorkspaceDevice>{};
-    final peers = favorites
+    final peers = easyTier
+        ? _easyTierWorkspaceDevices(widget.easyTier)
+        : favorites
         ? widget.favorites
         : widget.source == 0
         ? widget.nearby
@@ -491,6 +494,18 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
     ],
   );
 
+  Widget rowActions(WorkspaceDevice device, {Key? key}) => device.isEasyTier
+      ? _easyTierLinkAction(context, device, widget.onFillEasyTierIp, key: key)
+      : widget.actions(device, key: key);
+
+  void openDevice(WorkspaceDevice device) {
+    if (device.isEasyTier) {
+      widget.onFillEasyTierIp?.call(device.connectionAddress);
+    } else {
+      widget.onConnect(device, LanTool.desktop);
+    }
+  }
+
   Widget _sourceChips() => Wrap(
     key: const ValueKey('saved-device-sources'),
     spacing: 12,
@@ -515,45 +530,9 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
     ],
   );
 
-  Widget _easyTierDevices(EasyTierController controller) => Align(
-    alignment: Alignment.topCenter,
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 1040),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(32, 16, 32, 32),
-        children: [
-          _sourceChips(),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  t('EasyTier 节点', 'EasyTier nodes'),
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
-              IconButton(
-                tooltip: t('刷新节点', 'Refresh nodes'),
-                onPressed: controller.state != 'running' || controller.busy
-                    ? null
-                    : () => controller.command('refresh'),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          const Divider(),
-          EasyTierNodeList(controller: controller, onFill: widget.onFillEasyTierIp),
-        ],
-      ),
-    ),
-  );
-
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      if (widget.source == easyTierDeviceSource && widget.easyTier != null) {
-        return _easyTierDevices(widget.easyTier!);
-      }
       final showSidebar =
           box.maxWidth >= 850 &&
           MediaQuery.textScalerOf(context).scale(1) <= 1.3;
@@ -624,6 +603,8 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                                             'Favorite devices',
                                                           )
                                                         : groupName(_group)
+                                                  : easyTier
+                                                  ? t('EasyTier 设备', 'EasyTier devices')
                                                   : widget.source == 0
                                                   ? t('附近设备', 'Nearby devices')
                                                   : widget.source == 3
@@ -661,7 +642,10 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                     ),
                                     IconButton(
                                       tooltip: t('刷新设备', 'Refresh devices'),
-                                      onPressed: widget.onRefresh,
+                                      onPressed: easyTier
+                                          ? widget.easyTier!.state != 'running' || widget.easyTier!.busy
+                                              ? null : () => widget.easyTier!.command('refresh')
+                                          : widget.onRefresh,
                                       icon: const Icon(Icons.refresh),
                                     ),
                                   ],
@@ -750,7 +734,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                         }),
                                       ),
                                     ),
-                                    ElevatedButton.icon(
+                                    if (!easyTier) ElevatedButton.icon(
                                       onPressed: widget.onAdd,
                                       icon: const Icon(Icons.add, size: 19),
                                       label: Text(t('添加设备', 'Add device')),
@@ -1061,7 +1045,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                       final actions = Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          if (!compact)
+                                          if (!compact && !d.isEasyTier)
                                             OutlinedButton(
                                               onPressed: () => widget.onConnect(
                                                 d,
@@ -1083,7 +1067,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                           SizedBox(
                                             width: 40,
                                             height: 40,
-                                            child: widget.actions(
+                                            child: rowActions(
                                               d,
                                               key: ValueKey(
                                                 'device-actions-${d.id}',
@@ -1103,10 +1087,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                           onTap: () =>
                                               _selected.isNotEmpty && favorites
                                               ? toggle(d.id)
-                                              : widget.onConnect(
-                                                  d,
-                                                  LanTool.desktop,
-                                                ),
+                                              : openDevice(d),
                                           child: Padding(
                                             padding: const EdgeInsets.symmetric(
                                               vertical: 2,
@@ -1122,7 +1103,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                                       SizedBox(
                                                         width: 40,
                                                         height: 40,
-                                                        child: widget.actions(
+                                                        child: rowActions(
                                                           d,
                                                           key: ValueKey(
                                                             'device-actions-${d.id}',
@@ -1149,7 +1130,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                                                       ),
                                                     ),
                                                     group: Text(
-                                                      groupName(
+                                                      d.isEasyTier ? '—' : groupName(
                                                         groupFor(d.id) ??
                                                             favoriteUngroupedId,
                                                       ),

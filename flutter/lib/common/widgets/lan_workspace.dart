@@ -39,6 +39,7 @@ class WorkspaceDevice {
     this.autoUpdateAddress = true,
     this.addressSource = 'saved',
     this.addressRevision = 0,
+    this.networkDetails = '',
   });
   final String id;
   final String name;
@@ -49,6 +50,8 @@ class WorkspaceDevice {
   final String address, addressSource;
   final bool autoUpdateAddress;
   final int addressRevision;
+  final String networkDetails;
+  bool get isEasyTier => addressSource == 'easytier';
   String get connectionAddress => address.isEmpty ? id : address;
 
   String get displayAddress {
@@ -84,6 +87,34 @@ class WorkspaceDevice {
     addressRevision: peer.addressRevision,
   );
 }
+
+List<WorkspaceDevice> _easyTierWorkspaceDevices(EasyTierController? controller) {
+  final devices = <WorkspaceDevice>[];
+  for (final node in controller?.addressableNodes ?? <Map<String, dynamic>>[]) {
+    final ip = easyTierNodeIp(node);
+    if (ip == null) continue;
+    final name = node['name'];
+    devices.add(WorkspaceDevice(
+      id: 'easytier:$ip',
+      name: name is String && name.isNotEmpty ? name : ip,
+      address: ip.contains(':') ? '[$ip]' : ip,
+      addressSource: 'easytier',
+      networkDetails: [
+        if (node['latency'] != null) '${node['latency']} ms',
+        if (node['protocol'] is String && (node['protocol'] as String).isNotEmpty)
+          node['protocol'] as String,
+      ].join(' · '),
+    ));
+  }
+  return devices;
+}
+
+Widget _easyTierLinkAction(BuildContext context, WorkspaceDevice device, ValueChanged<String>? onFill, {Key? key}) => IconButton(
+  key: key ?? ValueKey('easytier-connect-${device.connectionAddress}'),
+  tooltip: subnetText(context, '填入 IP', 'Fill IP'),
+  icon: const Icon(Icons.link_rounded),
+  onPressed: onFill == null ? null : () => onFill(device.connectionAddress),
+);
 
 /// The live adapter keeps discovery and connections in the existing LAN stack.
 class LanWorkspacePage extends StatefulWidget {
@@ -811,7 +842,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
 
   Widget _desktopHome(BoxConstraints box) {
     final device = _continueDevice;
-    final homeDevices = _homeSource == 1 ? widget.favorites : _orderedNearby;
+    final homeDevices = _homeSource == easyTierDeviceSource
+        ? _easyTierWorkspaceDevices(widget.easyTier)
+        : _homeSource == 1 ? widget.favorites : _orderedNearby;
     final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
     final contentWidth = math.min(box.maxWidth - 64, 1040.0);
     final twoColumns = contentWidth >= 720 && !largeText;
@@ -962,17 +995,13 @@ class _LanWorkspaceState extends State<LanWorkspace> {
     bool twoColumns,
     double width,
   ) {
-    if (_homeSource == easyTierDeviceSource && widget.easyTier != null) {
-      return EasyTierNodeList(
-        controller: widget.easyTier!,
-        onFill: _fillEasyTierIp,
-      );
-    }
     if (devices.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Text(
-          _homeSource == 1
+          _homeSource == easyTierDeviceSource
+              ? t('当前没有可连接的 EasyTier 设备', 'No EasyTier devices with a usable IP')
+              : _homeSource == 1
               ? t('还没有收藏设备', 'No favorite devices yet')
               : t('尚未发现设备，可刷新或通过地址连接',
                   'No devices discovered. Refresh or connect by address.'),
@@ -1749,7 +1778,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
   }) => InkWell(
     key: ValueKey('device-row-' + device.id),
     borderRadius: BorderRadius.circular(16),
-    onTap: () => widget.mobile
+    onTap: device.isEasyTier
+        ? () => _fillEasyTierIp(device.connectionAddress)
+        : () => widget.mobile
         ? setState(() => _detail = device)
         : widget.onConnect(device, LanTool.desktop),
     child: Padding(
@@ -1783,7 +1814,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  device.displayAddress,
+                  device.isEasyTier && device.networkDetails.isNotEmpty
+                      ? '${device.displayAddress} · ${device.networkDetails}'
+                      : device.displayAddress,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1797,14 +1830,16 @@ class _LanWorkspaceState extends State<LanWorkspace> {
             ),
           ),
           if (!widget.mobile) ...[
-            if (!compact)
+            if (!compact && !device.isEasyTier)
               OutlinedButton(
                 onPressed: () => widget.onConnect(device, LanTool.desktop),
                 child: Text(
                   reconnect ? t('重新连接', 'Reconnect') : t('连接', 'Connect'),
                 ),
               ),
-            _deviceActions(
+            if (device.isEasyTier)
+              _easyTierLinkAction(context, device, _fillEasyTierIp)
+            else _deviceActions(
               device,
               key: ValueKey('device-actions-' + device.id),
             ),
