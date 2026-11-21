@@ -1,10 +1,11 @@
 use super::Result;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     env,
     ffi::OsString,
     io::{Read, Write},
-    net::{Ipv4Addr, SocketAddrV4, TcpListener},
+    net::{IpAddr, Ipv4Addr, SocketAddrV4, TcpListener},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::atomic::Ordering,
@@ -34,6 +35,8 @@ pub(super) struct Snapshot {
     pub nodes: Vec<Node>,
     pub routes: Vec<Route>,
     pub queried_at: Option<i64>,
+    pub allowed_sources: HashSet<IpAddr>,
+    pub observed_at: Option<Instant>,
 }
 
 #[derive(Serialize)]
@@ -328,9 +331,20 @@ impl Running {
             }
         });
         let routes: Vec<RouteRow> = self.query("route")?;
+        // 只允许节点自身的虚拟 IP，不把节点发布的代理子网加入白名单。
+        let allowed_sources = peers.iter()
+            .filter(|peer| peer.cost != "Local")
+            .map(|peer| peer.ipv4.as_str())
+            .chain(routes.iter().map(|route| route.ipv4.as_str()))
+            .filter_map(|ip| ip.parse::<Ipv4Addr>().ok())
+            .filter(|ip| !ip.is_unspecified())
+            .map(IpAddr::V4)
+            .collect();
         Ok(Snapshot {
             ipv4,
             queried_at: Some(chrono::Utc::now().timestamp_millis()),
+            allowed_sources,
+            observed_at: Some(Instant::now()),
             nodes: peers
                 .into_iter()
                 .filter(|peer| peer.cost != "Local")

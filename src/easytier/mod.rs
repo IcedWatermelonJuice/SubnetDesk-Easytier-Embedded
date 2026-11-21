@@ -1,11 +1,13 @@
 mod engine;
 mod profile;
+mod source_policy;
 
 use engine::{Components, Running, Snapshot};
 use profile::{Patch, Profile, Store};
 use serde::Deserialize;
 use serde_json::json;
 use std::{
+    net::IpAddr,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -24,6 +26,7 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const START_QUERY_INTERVAL: Duration = Duration::from_millis(750);
+const SOURCE_QUERY_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_COMMAND: usize = 512 * 1024;
 
 #[derive(Deserialize)]
@@ -44,6 +47,7 @@ enum Action {
     },
     Select { id: Uuid },
     Start { id: Option<Uuid> },
+    SetRemoteOnly { enabled: bool },
     Stop,
     Refresh,
     Delete { id: Uuid },
@@ -106,6 +110,15 @@ fn controller() -> Option<&'static Controller> {
     CONTROLLER.get_or_init(Controller::new).as_ref()
 }
 
+pub(crate) fn source_allowed(ip: IpAddr) -> bool {
+    let Some(controller) = CONTROLLER.get().and_then(Option::as_ref) else {
+        return false;
+    };
+    let view = controller.view.read().unwrap();
+    matches!(view.state, State::Running)
+        && source_policy::accepts(&view.snapshot.allowed_sources, view.snapshot.observed_at, ip)
+}
+
 pub(super) fn shutdown() {
     SHUTTING_DOWN.store(true, Ordering::Release);
     if let Some(controller) = CONTROLLER.get().and_then(Option::as_ref) {
@@ -154,6 +167,7 @@ pub(super) fn get_option(key: &str) -> Option<String> {
         "selected_id": view.store.selected_id,
         "running_id": view.running_id,
         "running_config_changed": view.running_config_changed,
+        "remote_only": crate::lan_server::easytier_only(),
         "state": view.state,
         "ipv4": view.snapshot.ipv4,
         "error": view.error,
@@ -253,6 +267,13 @@ impl Worker {
 
     fn run(mut self, receiver: Receiver<String>) {
         self.publish(None);
+        if crate::lan_server::easytier_only() {
+            if let Err(error) = self.selected_or(None).and_then(|id| self.start(id)) {
+                self.error = Some(error);
+                self.state = State::Failed;
+            }
+            self.publish(None);
+        }
         while !SHUTTING_DOWN.load(Ordering::Acquire) {
             self.poll();
             match receiver.recv_timeout(POLL_INTERVAL) {
@@ -322,7 +343,27 @@ impl Worker {
                 let id = self.selected_or(id)?;
                 self.start(id)
             }
-            Action::Stop => self.stop(),
+            Action::SetRemoteOnly { enabled } => {
+                let target = if enabled && self.running.is_none() {
+                    Some(self.selected_or(None)?)
+                } else {
+                    None
+                };
+                hbb_common::config::Config::set_option(
+                    base::config::keys::OPTION_LAN_EASYTIER_ONLY.to_owned(),
+                    if enabled { "Y" } else { "N" }.to_owned(),
+                );
+                // 启动失败时保留来源限制，不能无提示地恢复允许 LAN。
+                if let Some(id) = target { self.start(id)?; }
+                Ok(())
+            }
+            Action::Stop => {
+                self.stop()?;
+                hbb_common::config::Config::set_option(
+                    base::config::keys::OPTION_LAN_EASYTIER_ONLY.to_owned(), "N".to_owned(),
+                );
+                Ok(())
+            }
             Action::Refresh => self.refresh(),
             Action::Delete { id } => {
                 self.store.get(id)?;
@@ -425,6 +466,7 @@ impl Worker {
     }
 
     fn refresh(&mut self) -> Result<()> {
+        self.next_query = Instant::now() + SOURCE_QUERY_INTERVAL;
         let Some(running) = self.running.as_mut() else {
             return Ok(());
         };
@@ -458,7 +500,12 @@ impl Worker {
             self.fail_instance(error);
             return;
         }
-        if matches!(self.state, State::Starting) && Instant::now() >= self.next_query {
+        let needs_sources = hbb_common::config::Config::get_option(
+            base::config::keys::OPTION_LAN_EASYTIER_ONLY,
+        ) == "Y";
+        if (matches!(self.state, State::Starting) || needs_sources)
+            && Instant::now() >= self.next_query
+        {
             match self.refresh() {
                 Ok(()) => {
                     self.error = None;
@@ -467,7 +514,10 @@ impl Worker {
                 Err(_) if self.running.as_ref().is_some_and(Running::starting_timed_out) => {
                     self.fail_instance("EasyTier 启动超时。请检查组件、配置及虚拟网卡权限。");
                 }
-                Err(_) => {}
+                Err(error) => {
+                    self.error = Some(error);
+                    self.publish(None);
+                }
             }
         }
     }

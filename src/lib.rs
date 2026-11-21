@@ -57,6 +57,7 @@ pub mod core_main;
 mod desktop_runtime;
 #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
 mod easytier;
+mod lan_password;
 mod lang;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod port_forward;

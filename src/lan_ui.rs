@@ -184,7 +184,7 @@ pub(crate) fn apply_lan_settings(
                 );
             }
         } else {
-            Config::set_lan_credentials(&username, password.as_bytes())?;
+            crate::lan_password::set_credentials(&username, password.as_bytes())?;
         }
         Config::set_option("lan-listen-addresses".to_owned(), listen_addresses);
         Config::set_option("lan-listen-port".to_owned(), port.to_string());

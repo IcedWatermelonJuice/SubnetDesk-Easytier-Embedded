@@ -1017,6 +1017,9 @@ fn configured_network_value(web_value: &str, lan_value: &str) -> String {
 }
 
 fn web_source_allowed(ip: IpAddr) -> bool {
+    if crate::lan_server::easytier_only() {
+        return crate::lan_server::easytier_source_allowed(ip);
+    }
     let configured = configured_network_value(
         &Config::get_option("web-allowed-networks"),
         &Config::get_option("lan-allowed-networks"),

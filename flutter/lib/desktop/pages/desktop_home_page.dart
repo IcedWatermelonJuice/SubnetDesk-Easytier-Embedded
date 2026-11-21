@@ -1366,7 +1366,8 @@ Future<void> showLanSettingsDialog(
   final username = TextEditingController(
     text: info['username']?.toString() ?? '',
   );
-  final password = TextEditingController();
+  final savedPassword = bind.mainGetLocalOption(key: 'lan-saved-password');
+  final password = TextEditingController(text: savedPassword);
   final listenAddresses = TextEditingController(
     text: info['listen_addresses']?.toString() ?? '',
   );
@@ -1583,7 +1584,9 @@ Future<void> showLanSettingsDialog(
                           autocorrect: false,
                           enableSuggestions: false,
                           decoration: fieldDecoration(
-                            label: translate('Password'),
+                            label: credentialsConfigured
+                                ? '${translate('Password')} · ${subnetText(context, '已设置', 'Configured')}'
+                                : translate('Password'),
                             icon: Icons.lock_outline_rounded,
                             suffix: IconButton(
                               tooltip: passwordVisible
@@ -1882,6 +1885,9 @@ Future<void> showLanSettingsDialog(
                                 }
                                 await bind.mainSetOptions(
                                   json: jsonEncode(<String, String>{
+                                    ...Map<String, String>.from(
+                                      jsonDecode(bind.mainGetOptionsSync()) as Map,
+                                    ),
                                     'web-listen-addresses': webListenAddresses
                                         .text
                                         .trim(),
@@ -1896,7 +1902,10 @@ Future<void> showLanSettingsDialog(
                                 );
                                 var result = await bind.mainApplyLanSettings(
                                   username: username.text,
-                                  password: password.text,
+                                  password: password.text == savedPassword &&
+                                          username.text == info['username']
+                                      ? ''
+                                      : password.text,
                                   listenAddresses: listenAddresses.text,
                                   listenPort: listenPort.text,
                                   allowedNetworks: allowedNetworks.text,

@@ -1254,6 +1254,12 @@ pub fn main_discover() {
 }
 
 pub fn main_get_local_option(key: String) -> SyncReturn<String> {
+    if key == "lan-saved-password" {
+        return SyncReturn(crate::lan_password::load().unwrap_or_else(|error| {
+            log::warn!("无法读取已保存的 LAN 密码: {error}");
+            String::new()
+        }));
+    }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if key == "desktop-runtime" { return SyncReturn(crate::desktop_runtime::state()); }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -326,8 +326,22 @@ async fn bind_listeners(
 }
 
 pub fn source_allowed(ip: IpAddr) -> bool {
+    if easytier_only() {
+        return easytier_source_allowed(ip);
+    }
     let configured = Config::get_option("lan-allowed-networks");
     source_allowed_with(ip, &configured)
+}
+
+pub(crate) fn easytier_only() -> bool {
+    Config::get_option(base::config::keys::OPTION_LAN_EASYTIER_ONLY) == "Y"
+}
+
+pub(crate) fn easytier_source_allowed(ip: IpAddr) -> bool {
+    #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+    { crate::easytier::source_allowed(ip) }
+    #[cfg(not(all(feature = "flutter", not(any(target_os = "android", target_os = "ios")))))]
+    { let _ = ip; false }
 }
 
 pub(crate) fn source_allowed_with(ip: IpAddr, configured: &str) -> bool {
