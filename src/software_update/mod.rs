@@ -17,8 +17,8 @@ use std::{
 };
 
 const DEFAULT_MANIFEST_URL: &str =
-    "https://github.com/zibo-chen/SubnetDesk/releases/latest/download/update-stable.json";
-const RELEASES_URL: &str = "https://github.com/zibo-chen/SubnetDesk/releases/latest";
+    "https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/latest/download/update-stable.json";
+const RELEASES_URL: &str = "https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases";
 const UPDATE_EVENT_NAME: &str = "software_update";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;

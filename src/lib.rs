@@ -59,6 +59,8 @@ mod desktop_runtime;
 mod easytier;
 mod lan_password;
 mod lan_cleanup;
+#[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+mod config_backup;
 mod lang;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod port_forward;

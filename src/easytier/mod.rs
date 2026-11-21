@@ -21,6 +21,14 @@ use uuid::Uuid;
 
 type Result<T> = std::result::Result<T, &'static str>;
 
+pub(crate) fn backup_store_path() -> Result<PathBuf> {
+    profile::backup_store_path()
+}
+
+pub(crate) fn validate_backup_store(data: &[u8]) -> Result<()> {
+    profile::validate_backup_store(data)
+}
+
 static CONTROLLER: OnceLock<Option<Controller>> = OnceLock::new();
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 

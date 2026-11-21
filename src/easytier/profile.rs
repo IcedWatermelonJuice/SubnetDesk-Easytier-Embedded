@@ -96,6 +96,32 @@ fn read_limited(file: File, max_bytes: usize) -> Result<String> {
     String::from_utf8(bytes).map_err(|_| "EasyTier 方案文件必须使用 UTF-8。")
 }
 
+pub(super) fn backup_store_path() -> Result<PathBuf> {
+    Ok(private_dir()?.join("profiles.json"))
+}
+
+pub(super) fn validate_backup_store(data: &[u8]) -> Result<()> {
+    if data.len() > MAX_STORE {
+        return Err("EasyTier 方案的总长度超出限制。");
+    }
+    let store: Store = serde_json::from_slice(data).map_err(|_| "备份中的 EasyTier 方案索引无效。")?;
+    if store.profiles.len() > MAX_PROFILES {
+        return Err("备份中的 EasyTier 方案数量超出限制。");
+    }
+    let mut ids = std::collections::HashSet::new();
+    for profile in &store.profiles {
+        if !ids.insert(profile.id) {
+            return Err("备份中的 EasyTier 方案 ID 重复。");
+        }
+        name(&profile.name)?;
+        parse(&profile.toml)?;
+    }
+    if store.selected_id.is_some_and(|id| !ids.contains(&id)) {
+        return Err("备份中选中的 EasyTier 方案不存在。");
+    }
+    Ok(())
+}
+
 pub(super) fn import(path: &Path) -> Result<String> {
     if !fs::metadata(path).map_err(|_| "无法检查待导入的 TOML 文件。")?.is_file() {
         return Err("导入来源必须是普通文件。");
