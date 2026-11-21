@@ -342,6 +342,10 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
     }
   }
 
+  Future<void> _removeRecent(WorkspaceDevice device) async {
+    await bind.mainRemovePeer(id: device.id);
+  }
+
   Future<UndoDeviceAddress> _editAddress(
     WorkspaceDevice device,
     String address,
@@ -406,6 +410,7 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
       onDeleteGroup: favoriteGroupModel.deleteGroup,
       onConnect: _connect,
       onFavorite: _favorite,
+      onRemoveRecent: _removeRecent,
       onRefresh: _refresh,
       onSettings: widget.onSettings,
       onNavigationChanged: widget.onNavigationChanged,
@@ -443,6 +448,7 @@ class LanWorkspace extends StatefulWidget {
     required this.favorites,
     required this.onConnect,
     required this.onFavorite,
+    this.onRemoveRecent,
     required this.onRefresh,
     required this.onSettings,
     this.mobile = false,
@@ -467,6 +473,7 @@ class LanWorkspace extends StatefulWidget {
   final List<WorkspaceDevice> nearby, recent, favorites;
   final void Function(WorkspaceDevice, LanTool) onConnect;
   final ValueChanged<WorkspaceDevice> onFavorite;
+  final Future<void> Function(WorkspaceDevice)? onRemoveRecent;
   final VoidCallback onRefresh, onSettings;
   final bool mobile;
   final bool incomingOnly;
@@ -1358,8 +1365,11 @@ class _LanWorkspaceState extends State<LanWorkspace> {
             ? '${t('更多设备操作', 'More device actions')} · ${device.displayName}'
             : t('更多设备操作', 'More device actions'),
         icon: const Icon(Icons.more_horiz_rounded),
-        onSelected: (value) {
+        onSelected: (value) async {
           switch (value) {
+            case 'remove-recent':
+              await widget.onRemoveRecent?.call(device);
+              return;
             case 'details':
               if (widget.mobile) {
                 setState(() => _detail = device);
@@ -1381,6 +1391,11 @@ class _LanWorkspaceState extends State<LanWorkspace> {
           }
         },
         itemBuilder: (_) => [
+          if (_navigation == 1 && _filter == 3 && widget.onRemoveRecent != null)
+            PopupMenuItem(
+              value: 'remove-recent',
+              child: Text(t('从最近连接移除', 'Remove from recent connections')),
+            ),
           if (widget.onEditAddress != null && isDeviceFingerprint(device.id))
             PopupMenuItem(
               value: 'edit-address',

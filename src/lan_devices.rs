@@ -32,6 +32,9 @@ pub(crate) struct SavedDevice {
 struct Registry {
     #[serde(default)]
     devices: BTreeMap<String, SavedDevice>,
+    // 仅隐藏最近列表记录；保留身份、地址、收藏及凭据，供重新发现时恢复。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    hidden_recent: BTreeMap<String, i64>,
 }
 
 pub(crate) fn valid_fingerprint(value: &str) -> bool {
@@ -77,6 +80,12 @@ impl Registry {
                     .or_insert(saved);
             }
         }
+        registry.hidden_recent = old.hidden_recent.into_iter()
+            .filter_map(|(id, removed_at)| {
+                let id = id.to_ascii_lowercase();
+                registry.devices.contains_key(&id).then_some((id, removed_at))
+            })
+            .collect();
         Ok(registry)
     }
 
@@ -180,6 +189,24 @@ impl Registry {
         }
     }
 
+    fn reconcile_recent(&mut self, discovered: &[DiscoveryPeer], now: i64) {
+        for (id, saved) in &self.devices {
+            if saved.peer.last_connected_at <= 0 { continue; }
+            let presence = crate::lan::find_discovered_peer(discovered, &saved.peer.fingerprint, &saved.endpoint)
+                .filter(|peer| normalize_address(&peer.endpoint).ok().as_deref() == Some(&saved.endpoint)
+                    && peer.last_seen >= saved.address_changed_at);
+            let online = presence.and_then(|peer| peer.online_state(now));
+            let last_seen = presence.map(|peer| peer.last_seen).unwrap_or_default();
+            if let Some(removed_at) = self.hidden_recent.get(id) {
+                if crate::lan_cleanup::rediscovered(*removed_at, online, last_seen, saved.peer.last_connected_at) {
+                    self.hidden_recent.remove(id);
+                }
+            } else if crate::lan_cleanup::expired(online, last_seen, now) {
+                self.hidden_recent.insert(id.clone(), now);
+            }
+        }
+    }
+
     fn update(
         &mut self,
         id: &str,
@@ -263,6 +290,7 @@ fn synchronized(discovered: &[DiscoveryPeer], now: i64) -> ResultType<Registry> 
         });
     }
     registry.discover(discovered, now);
+    registry.reconcile_recent(discovered, now);
     if registry != before {
         registry.store()?;
     }
@@ -363,6 +391,7 @@ pub(crate) fn saved_peers(
         LocalConfig::get_recent_lan_endpoints()
             .iter()
             .filter_map(|peer| registry.id_for_peer(peer))
+            .filter(|id| !registry.hidden_recent.contains_key(id))
             .collect()
     };
     let mut seen = HashSet::new();
@@ -387,6 +416,25 @@ pub(crate) fn saved_peers(
             crate::lan_ui::recent_lan_endpoint_to_map(peer, &[], now)
         })
         .collect())
+}
+
+pub(crate) fn observe_discovery(peers: &[DiscoveryPeer], now: i64) -> ResultType<()> {
+    synchronized(peers, now).map(|_| ())
+}
+
+pub(crate) fn remove_recent(id: &str) -> ResultType<()> {
+    let now = hbb_common::get_time();
+    synchronized(&hbb_common::config::LanPeers::load().peers, now)?;
+    let _guard = EDIT.lock().unwrap();
+    let mut registry = Registry::load()?;
+    let id = if valid_fingerprint(id) {
+        id.to_ascii_lowercase()
+    } else {
+        registry.legacy_owner(id).ok_or_else(|| anyhow!("Unknown recent device"))?
+    };
+    if !registry.devices.contains_key(&id) { bail!("Unknown recent device"); }
+    registry.hidden_recent.insert(id, now);
+    registry.store()
 }
 
 pub(crate) fn discovered_peers(
