@@ -1363,6 +1363,7 @@ Future<void> showLanSettingsDialog(
     info = <String, dynamic>{};
   }
   final credentialsConfigured = info['configured'] == true;
+  final easytierOnly = await bind.mainGetOption(key: 'lan-easytier-only') == 'Y';
   final username = TextEditingController(
     text: info['username']?.toString() ?? '',
   );
@@ -1642,14 +1643,19 @@ Future<void> showLanSettingsDialog(
                     ]),
                     const SizedBox(height: 14),
                     TextField(
-                      controller: allowedNetworks,
+                      controller: easytierOnly ? null : allowedNetworks,
+                      enabled: !easytierOnly,
                       decoration: fieldDecoration(
                         label: translate('Network'),
                         icon: Icons.route_outlined,
-                        help: translate(
+                        help: easytierOnly ? null : translate(
                           'Comma-separated CIDR ranges; blank uses safe LAN/VPN defaults',
                         ),
-                      ),
+                      ).copyWith(
+                        floatingLabelBehavior: easytierOnly ? FloatingLabelBehavior.always : null,
+                        hintText: easytierOnly
+                          ? subnetText(context, '被 EasyTier 接管', 'Managed by EasyTier')
+                          : null),
                     ),
                     const SizedBox(height: 16),
                     Container(
