@@ -82,6 +82,7 @@ mod backend {
             tracing::warn!("peer manager is dropped, skip Windows UDP broadcast relay");
             return;
         };
+
         match super::windows_udp_broadcast::start(peer_manager, virtual_ipv4) {
             Ok(handle) => {
                 self.windows_udp_broadcast_relay = Some(handle);
@@ -102,7 +103,7 @@ mod backend {
     return crate
 
 
-def build(upstream, archive, protoc, arch, output):
+def build(upstream, archive, protoc, arch, output, target_dir=None):
     if os.name != "nt" or not (upstream / ".git").exists() or not protoc.is_file():
         raise ValueError("需要 Windows、上游 EasyTier Git 仓库及本地 protoc.exe")
     if output.exists():
@@ -116,7 +117,7 @@ def build(upstream, archive, protoc, arch, output):
 
     with TemporaryDirectory() as temporary:
         source = Path(temporary) / "easytier"
-        target_dir = Path(temporary) / "target"
+        target_dir = target_dir or Path(temporary) / "target"
         subprocess.run(["git", "clone", "--shared", "--no-checkout", "--", str(upstream), str(source)], check=True)
         subprocess.run(["git", "checkout", "--detach", COMMIT], cwd=source, check=True)
         crate = patch_sources(source, archive)
@@ -128,7 +129,7 @@ def build(upstream, archive, protoc, arch, output):
         # 提供实际构建的修改后源码。上游 third_party 目录只含非构建必需的二进制。
         tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=source).decode("utf-8").split("\0")
         output.mkdir(parents=True)
-        with ZipFile(output / "easytier-source.zip", "x", ZIP_DEFLATED) as sources:
+        with ZipFile(output / "easytier-source.zip", "x", ZIP_DEFLATED, strict_timestamps=False) as sources:
             for name in tracked:
                 if name and not name.startswith("easytier/third_party/") and (source / name).is_file():
                     sources.write(source / name, name)
@@ -152,8 +153,10 @@ def main():
     parser.add_argument("--protoc", required=True, type=Path)
     parser.add_argument("--arch", required=True, choices=WINDOWS_ASSETS)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--target-dir", type=Path, help="复用独立的 EasyTier 编译缓存目录")
     args = parser.parse_args()
-    build(args.upstream.resolve(), args.pnet_datalink.resolve(), args.protoc.resolve(), args.arch, args.output.resolve())
+    build(args.upstream.resolve(), args.pnet_datalink.resolve(), args.protoc.resolve(), args.arch, args.output.resolve(),
+          args.target_dir.resolve() if args.target_dir else None)
 
 
 if __name__ == "__main__":

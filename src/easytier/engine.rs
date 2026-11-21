@@ -347,7 +347,7 @@ impl Running {
                 })
                 .collect(),
             routes: routes
-                .into_iter()
+                .iter()
                 .flat_map(|route| route.rows(self.latency_first))
                 .take(MAX_ROWS)
                 .collect(),

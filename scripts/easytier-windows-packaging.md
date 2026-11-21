@@ -23,4 +23,6 @@
 python scripts/build_windows_easytier.py --upstream <EasyTier仓库> --pnet-datalink <pnet_datalink-0.35.0.crate> --protoc <protoc.exe> --arch x86_64 --output <新输出目录>
 ```
 
-ARM64 使用 `--arch aarch64`。脚本在临时目录检出固定提交并核验 crate 摘要，保留 Windows 现有接口枚举，关闭物理数据链路捕获和 FakeTCP。它输出通过 PE 依赖检查的 core、摘要及改动后的源码归档。构建仍可能按上游锁文件获取依赖。该命令由发行者单独执行，Flutter 的 Rust 工具链和 CI 默认设置保持原样。填上面变量前需确认 core 可启动并保留基础组网。本次交付尚未运行构建。
+本地重复构建可以追加 `--target-dir <独立缓存目录>`，复用 EasyTier 的编译缓存；该目录应与 SubnetDesk 的 Rust 1.82 编译缓存分开。Windows 本地构建应使用普通完整性级别的目录：旧目录若继承 Low 完整性标签，生成的构建脚本可能无法写入源码或临时目录。
+
+ARM64 使用 `--arch aarch64`。脚本在临时目录检出固定提交并核验 crate 摘要，保留 Windows 现有接口枚举，关闭物理数据链路捕获和 FakeTCP。它输出通过 PE 依赖检查的 core、摘要及改动后的源码归档。构建仍可能按上游锁文件获取依赖。该命令由发行者单独执行，Flutter 的 Rust 工具链和 CI 默认设置保持原样。填上面变量前需确认 core 可启动并保留基础组网。Windows x64 已完成固定源码 core 构建、版本核对及 PE 依赖检查；ARM64 尚未构建验证。
