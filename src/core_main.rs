@@ -34,6 +34,22 @@ pub fn core_main() -> Option<Vec<String>> {
         eprintln!("Cannot open SubnetDesk data directory: {err}");
         return None;
     }
+    #[cfg(feature = "flutter")]
+    if let Err(error) = crate::config_backup::apply_pending_on_startup() {
+        eprintln!("无法安全恢复配置，启动已停止以保留原配置：{error}");
+        #[cfg(windows)]
+        unsafe {
+            let text = crate::platform::wide_string(&format!(
+                "无法安全恢复配置，已停止启动以保留原配置。\n{error}\n请勿删除 userdata 中的恢复记录和原配置副本。"
+            ));
+            let title = crate::platform::wide_string("SubnetDesk · 配置恢复");
+            winapi::um::winuser::MessageBoxW(
+                std::ptr::null_mut(), text.as_ptr(), title.as_ptr(),
+                winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONERROR,
+            );
+        }
+        return None;
+    }
     if !crate::common::global_init() {
         return None;
     }

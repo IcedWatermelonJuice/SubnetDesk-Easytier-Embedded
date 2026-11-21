@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_hbb/common/widgets/subnet_ui.dart';
+import 'package:flutter_hbb/common/widgets/config_backup.dart';
 import 'package:flutter_hbb/desktop/lan_identity_manager.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -352,6 +353,11 @@ class _GeneralState extends State<_General> {
             ),
           )),
         ],
+        if (!isWeb)
+          _Card(
+            title: subnetText(context, '配置备份与恢复', 'Configuration backup and restore'),
+            children: [const ConfigBackupPanel()],
+          ),
       ],
     ).marginOnly(bottom: _kListViewBottomMargin);
   }

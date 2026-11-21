@@ -1254,6 +1254,8 @@ pub fn main_discover() {
 }
 
 pub fn main_get_local_option(key: String) -> SyncReturn<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if key == "config-backup-status" { return SyncReturn(crate::config_backup::status()); }
     if key == "lan-saved-password" {
         return SyncReturn(crate::lan_password::load().unwrap_or_else(|error| {
             log::warn!("无法读取已保存的 LAN 密码: {error}");
@@ -1307,6 +1309,11 @@ pub fn main_set_env(key: String, value: Option<String>) -> SyncReturn<()> {
 }
 
 pub fn main_set_local_option(key: String, value: String) {
+    if key == "config-backup-command" {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        crate::config_backup::submit(value);
+        return;
+    }
     if key == "easytier-command" {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         crate::easytier::submit(value);

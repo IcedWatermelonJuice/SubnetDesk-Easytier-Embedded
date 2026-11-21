@@ -30,6 +30,7 @@ pub fn is_stopping() -> bool {
 }
 
 pub fn claim() -> ResultType<bool> {
+    if is_host() { return Ok(true); }
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;

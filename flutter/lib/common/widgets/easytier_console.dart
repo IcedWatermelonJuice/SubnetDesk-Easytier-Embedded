@@ -424,7 +424,9 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
                           leadingIcon: Icon(profile['id'] == selectedId ? Icons.check_circle_rounded : Icons.hub_outlined),
                           style: MenuItemButton.styleFrom(
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            backgroundColor: profile['id'] == selectedId ? Theme.of(context).colorScheme.secondaryContainer : null,
+                            backgroundColor: profile['id'] == selectedId ? Theme.of(context).colorScheme.surfaceContainerHighest : null,
+                            foregroundColor: Theme.of(context).colorScheme.onSurface,
+                            iconColor: Theme.of(context).colorScheme.onSurface,
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                           ),
                           onPressed: controller.busy ? null : () => controller.command('select', {'id': profile['id']}),
