@@ -2973,13 +2973,24 @@ impl Connection {
             return Some("No active console user logged on, please connect and logon first.");
         }
 
-        // 终端子进程继承宿主令牌，只允许普通终端继承已确认未提升的令牌。
+        // 普通终端保持未提升；管理员宿主可使用同一用户的 UAC 非提升令牌。
         match crate::platform::is_elevated(Some(pid)) {
             Ok(false) => {
                 self.terminal_user_token = Some(TerminalUserToken::SelfUser);
                 None
             }
-            Ok(true) => Some("Restart SubnetDesk without administrator rights to use the terminal."),
+            Ok(true) => match crate::platform::get_current_user_limited_token() {
+                Ok(token) => {
+                    self.terminal_user_token = Some(TerminalUserToken::CurrentLogonUser(
+                        crate::terminal_service::UserToken::new(token as usize),
+                    ));
+                    None
+                }
+                Err(err) => {
+                    log::warn!("无法获取普通终端的非提升用户令牌：{err}");
+                    Some("Cannot obtain a non-administrator token for the terminal. Enable Windows UAC and sign in with an interactive user.")
+                }
+            },
             Err(err) => {
                 log::warn!("无法确认普通终端宿主的令牌提升状态：{err}");
                 Some("Cannot verify terminal host privileges. Restart SubnetDesk without administrator rights.")
@@ -5097,7 +5108,7 @@ impl Connection {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn connection_manager_launch_args() -> Vec<&'static str> {
-    vec!["--cm-no-ui"]
+    vec!["--cm"]
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -5980,8 +5991,8 @@ mod test {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
-    fn lan_connection_manager_is_always_headless() {
-        assert_eq!(connection_manager_launch_args(), vec!["--cm-no-ui"]);
+    fn lan_connection_manager_shows_session_controls() {
+        assert_eq!(connection_manager_launch_args(), vec!["--cm"]);
     }
 
     fn msg(set: impl FnOnce(&mut Message)) -> Message {

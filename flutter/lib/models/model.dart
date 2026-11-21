@@ -3760,13 +3760,20 @@ class RecordingModel with ChangeNotifier {
     final pi = parent.target?.ffiModel.pi;
     if (pi == null) return;
     bool value = !_start;
+    await bind.sessionRecordScreen(sessionId: sessionId, start: value);
     if (value) {
+      // 先进入录制状态，再请求关键帧，避免开始时丢掉唯一的关键帧。
       await sessionRefreshVideo(sessionId, pi);
     }
-    await bind.sessionRecordScreen(sessionId: sessionId, start: value);
   }
 
   updateStatus(bool status) {
+    if (_start != status && isDesktop) {
+      final directory = bind.mainVideoSaveDirectory(root: false);
+      showToast(status
+          ? '录屏已启动，保存目录：$directory'
+          : '录屏已停止，保存目录：$directory');
+    }
     _start = status;
     notifyListeners();
   }

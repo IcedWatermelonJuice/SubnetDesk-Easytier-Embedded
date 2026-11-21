@@ -1028,6 +1028,7 @@ pub struct VideoHandler {
     pub texture: ImageTexture,
     recorder: Arc<Mutex<Option<Recorder>>>,
     record: bool,
+    record_error: Option<String>,
     _display: usize, // useful for debug
     fail_counter: usize,
     first_frame: bool,
@@ -1060,6 +1061,7 @@ impl VideoHandler {
             texture: Default::default(),
             recorder: Default::default(),
             record: false,
+            record_error: None,
             _display,
             fail_counter: 0,
             first_frame: true,
@@ -1105,14 +1107,20 @@ impl VideoHandler {
                 }
                 self.first_frame = false;
                 if self.record {
-                    self.recorder.lock().unwrap().as_mut().map(|r| {
+                    let write_result = self.recorder.lock().unwrap().as_mut().map(|r| {
                         let (w, h) = if *pixelbuffer {
                             (self.rgb.w, self.rgb.h)
                         } else {
                             (self.texture.w, self.texture.h)
                         };
-                        r.write_frame(frame, w, h).ok();
+                        r.write_frame(frame, w, h)
                     });
+                    if let Some(Err(error)) = write_result {
+                        log::error!("Failed to write recording: {error}");
+                        self.record_error = Some(error.to_string());
+                        self.record = false;
+                        self.recorder = Default::default();
+                    }
                 }
                 res
             }
@@ -1138,16 +1146,23 @@ impl VideoHandler {
     /// Start or stop screen record.
     pub fn record_screen(&mut self, start: bool, id: String, display_idx: usize, camera: bool) {
         self.record = false;
+        self.record_error = None;
         if start {
-            self.recorder = Recorder::new(RecorderContext {
+            match Recorder::new(RecorderContext {
                 server: false,
                 id,
                 dir: crate::ui_interface::video_save_directory(false),
                 display_idx,
                 camera,
                 tx: None,
-            })
-            .map_or(Default::default(), |r| Arc::new(Mutex::new(Some(r))));
+            }) {
+                Ok(recorder) => self.recorder = Arc::new(Mutex::new(Some(recorder))),
+                Err(error) => {
+                    log::error!("Failed to initialize recording: {error}");
+                    self.record_error = Some(error.to_string());
+                    return;
+                }
+            }
         } else {
             self.recorder = Default::default();
         }
@@ -2291,6 +2306,13 @@ pub fn start_video_thread<F, T>(
                                     session.refresh_video(display as _);
                                 }
                                 _ => {}
+                            }
+                            if let Some(error) = handler.record_error.take() {
+                                session.send(Data::RecordScreen(false));
+                                session.msgbox("error", "录屏失败", &format!(
+                                    "录屏已停止，无法写入文件。\n目录：{}\n错误：{error}",
+                                    crate::ui_interface::video_save_directory(false)
+                                ), "");
                             }
                         }
 

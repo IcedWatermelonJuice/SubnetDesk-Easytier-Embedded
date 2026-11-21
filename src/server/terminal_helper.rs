@@ -51,9 +51,10 @@ use windows::{
                 SetEntriesInAclW, EXPLICIT_ACCESS_W, SET_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
                 TRUSTEE_W,
             },
-            CreateWellKnownSid, GetLengthSid, GetTokenInformation, InitializeSecurityDescriptor,
-            SetSecurityDescriptorDacl, TokenUser, WinLocalSystemSid, ACE_FLAGS, ACL,
-            PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_USER,
+            AddMandatoryAce, CreateWellKnownSid, GetLengthSid, GetTokenInformation, InitializeAcl,
+            InitializeSecurityDescriptor, SetSecurityDescriptorDacl, SetSecurityDescriptorSacl,
+            TokenSessionId, TokenUser, WinLocalSystemSid, WinMediumLabelSid, ACE_FLAGS, ACL,
+            ACL_REVISION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_USER,
         },
         Storage::FileSystem::{
             CreateFileW, FILE_ALL_ACCESS, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED,
@@ -66,8 +67,9 @@ use windows::{
                 ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
             },
             Threading::{
-                CreateEventW, CreateProcessAsUserW, WaitForSingleObject, CREATE_NO_WINDOW,
-                CREATE_UNICODE_ENVIRONMENT, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION,
+                CreateEventW, CreateProcessAsUserW, CreateProcessWithTokenW, WaitForSingleObject,
+                CREATE_NO_WINDOW, CREATE_PROCESS_LOGON_FLAGS, CREATE_UNICODE_ENVIRONMENT,
+                PROCESS_CREATION_FLAGS, PROCESS_INFORMATION,
                 STARTUPINFOW,
             },
             IO::{GetOverlappedResult, OVERLAPPED},
@@ -522,6 +524,21 @@ pub fn create_named_pipe_server(
             .map_err(|e| anyhow!("Failed to initialize security descriptor: {}", e))?;
     }
 
+    // 管道由提升宿主创建，但必须允许同用户的普通终端写入；DACL 仍仅放行该用户和 SYSTEM。
+    // 显式 Medium 完整性标签避免宿主的 High 标签阻止非提升 helper 连接。
+    let mut medium_sid = [0u64; 8];
+    let mut medium_sid_size = std::mem::size_of_val(&medium_sid) as u32;
+    let mut label_acl = [0u64; 16];
+    let label_acl_ptr = label_acl.as_mut_ptr() as *mut ACL;
+    unsafe {
+        CreateWellKnownSid(WinMediumLabelSid, None,
+            Some(PSID(medium_sid.as_mut_ptr() as *mut c_void)), &mut medium_sid_size)?;
+        InitializeAcl(label_acl_ptr, std::mem::size_of_val(&label_acl) as u32, ACL_REVISION)?;
+        AddMandatoryAce(label_acl_ptr, ACL_REVISION, ACE_FLAGS(0), 1,
+            PSID(medium_sid.as_mut_ptr() as *mut c_void))?; // SYSTEM_MANDATORY_LABEL_NO_WRITE_UP
+        SetSecurityDescriptorSacl(sd_ptr, true, Some(label_acl_ptr), false)?;
+    }
+
     // Create restricted DACL - fail if this doesn't work (no NULL DACL fallback)
     let user_sid = get_user_sid_from_token(user_token)
         .context("Failed to get user SID from token for pipe DACL")?;
@@ -713,10 +730,13 @@ pub fn launch_terminal_helper_with_token(
 
     // Build command line arguments (without exe path to avoid escaping issues)
     // lpApplicationName will contain the exe path separately
-    let cmd_args = format!(
+    let mut cmd_args = format!(
         "--terminal-helper {} {} {} {} {}",
         input_pipe_name, output_pipe_name, rows, cols, terminal_id
     );
+    if let Some(paths) = hbb_common::app_paths::get() {
+        cmd_args.push_str(&format!(" --data-dir=\"{}\"", paths.root.display()));
+    }
 
     log::debug!("Launching terminal helper for terminal {}", terminal_id);
 
@@ -768,7 +788,7 @@ pub fn launch_terminal_helper_with_token(
 
     // Use lpApplicationName to pass exe path separately from command line
     // This avoids potential issues with special characters in the exe path
-    let result = unsafe {
+    let mut result = unsafe {
         CreateProcessAsUserW(
             Some(HANDLE(user_token.as_raw() as _)),
             PCWSTR::from_raw(exe_path_wide.as_ptr()), // lpApplicationName: exe path
@@ -784,10 +804,39 @@ pub fn launch_terminal_helper_with_token(
         )
     };
 
+    // 交互管理员通常没有服务账户的替换主令牌权限。
+    // 只在同一会话内回退，避免把服务目标用户错误地启动到 Session 0。
+    if result.as_ref().is_err_and(|error| {
+        error.code() == windows::core::HRESULT::from_win32(1314)
+    }) {
+        let mut session = 0u32;
+        let mut length = 0;
+        unsafe {
+            GetTokenInformation(
+                HANDLE(user_token.as_raw() as _), TokenSessionId,
+                Some(&mut session as *mut _ as *mut c_void),
+                std::mem::size_of::<u32>() as u32, &mut length,
+            )
+        }.map_err(|error| anyhow!("Failed to verify terminal token session: {error}"))?;
+        if session != 0 && Some(session) == crate::platform::get_current_process_session_id() {
+            // CreateProcessAsUserW 可以修改命令行缓冲区，回退前恢复完整内容。
+            cmd_wide = OsStr::new(&cmd_line).encode_wide().chain(std::iter::once(0)).collect();
+            result = unsafe {
+                CreateProcessWithTokenW(
+                    HANDLE(user_token.as_raw() as _), CREATE_PROCESS_LOGON_FLAGS(0),
+                    PCWSTR::from_raw(exe_path_wide.as_ptr()),
+                    Some(PWSTR::from_raw(cmd_wide.as_mut_ptr())), creation_flags,
+                    if env_ok { Some(environment) } else { None },
+                    PCWSTR::null(), &si, &mut pi,
+                )
+            };
+        }
+    }
+
     // Environment block cleanup is handled by _env_guard's Drop
 
     if let Err(e) = result {
-        log::error!("CreateProcessAsUserW failed: {}", e);
+        log::error!("Terminal helper process creation failed: {}", e);
         return Err(anyhow!("Failed to launch terminal helper: {}", e));
     }
 

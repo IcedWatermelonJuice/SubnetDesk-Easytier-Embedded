@@ -407,30 +407,45 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
               children: [
                 SizedBox(
                   width: 260,
-                  child: InputDecorator(
-                    decoration: InputDecoration(
-                      labelText: t('选中的方案', 'Selected profile'),
-                      border: const OutlineInputBorder(),
+                  child: MenuAnchor(
+                    alignmentOffset: const Offset(0, 6),
+                    style: MenuStyle(
+                      backgroundColor: WidgetStatePropertyAll(Theme.of(context).colorScheme.surface),
+                      surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+                      elevation: const WidgetStatePropertyAll(3),
+                      padding: const WidgetStatePropertyAll(EdgeInsets.all(8)),
+                      maximumSize: const WidgetStatePropertyAll(Size(320, 320)),
+                      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                      side: WidgetStatePropertyAll(BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
                     ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        isExpanded: true,
-                        isDense: true,
-                        value: selectedId is String ? selectedId : null,
-                        hint: Text(t('请选择方案', 'Select a profile')),
-                        items: [
-                          for (final profile in controller.profiles)
-                            DropdownMenuItem(
-                              value: _string(profile['id']),
-                              child: Text(_string(profile['name']), overflow: TextOverflow.ellipsis),
-                            ),
-                        ],
-                        onChanged: controller.busy
-                            ? null
-                            : (id) {
-                                if (id != null) controller.command('select', {'id': id});
-                              },
+                    menuChildren: [
+                      for (final profile in controller.profiles)
+                        MenuItemButton(
+                          leadingIcon: Icon(profile['id'] == selectedId ? Icons.check_circle_rounded : Icons.hub_outlined),
+                          style: MenuItemButton.styleFrom(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            backgroundColor: profile['id'] == selectedId ? Theme.of(context).colorScheme.secondaryContainer : null,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                          ),
+                          onPressed: controller.busy ? null : () => controller.command('select', {'id': profile['id']}),
+                          child: SizedBox(width: 208, child: Text(_string(profile['name']), overflow: TextOverflow.ellipsis)),
+                        ),
+                    ],
+                    builder: (context, menu, _) => OutlinedButton(
+                      onPressed: controller.busy || controller.profiles.isEmpty ? null : () => menu.isOpen ? menu.close() : menu.open(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
+                      child: Row(children: [
+                        const Icon(Icons.hub_outlined, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(t('选中的方案', 'Selected profile'), style: Theme.of(context).textTheme.labelSmall),
+                          Text(selected == null ? t('请选择方案', 'Select a profile') : _string(selected['name']), overflow: TextOverflow.ellipsis),
+                        ])),
+                        const Icon(Icons.expand_more_rounded, size: 20),
+                      ]),
                     ),
                   ),
                 ),
