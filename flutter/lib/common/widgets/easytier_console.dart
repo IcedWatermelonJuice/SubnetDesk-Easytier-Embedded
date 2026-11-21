@@ -20,6 +20,14 @@ List<_Entry> _entries(Object? value) =>
 
 const easyTierDeviceSource = 4;
 
+String? easyTierNodeIp(Map<String, dynamic> node) {
+  final ip = InternetAddress.tryParse(_string(node['address']).trim());
+  if (ip == null || ip.isLoopback || ip.address == '0.0.0.0' || ip.address == '::') {
+    return null;
+  }
+  return ip.address;
+}
+
 class EasyTierController extends ChangeNotifier {
   _Entry _status = const {};
   String? _lastSnapshot;
@@ -74,6 +82,7 @@ class EasyTierController extends ChangeNotifier {
   }
   List<_Entry> get nodes =>
       state == 'running' ? _entries(_status['nodes']) : const [];
+  List<_Entry> get addressableNodes => nodes.where((node) => easyTierNodeIp(node) != null).toList();
   List<_Entry> get routes =>
       state == 'running' ? _entries(_status['routes']) : const [];
 
@@ -558,7 +567,7 @@ class EasyTierNodeList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final nodes = controller.nodes;
+    final nodes = controller.addressableNodes;
     if (controller.state != 'running' || nodes.isEmpty) {
       return Text(controller.state != 'running'
           ? _networkStateMessage(context, controller.state)
