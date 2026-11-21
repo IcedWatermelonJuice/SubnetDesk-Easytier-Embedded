@@ -17,6 +17,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../common.dart';
+import '../../common/widgets/subnet_ui.dart';
 import '../../common/widgets/chat_page.dart';
 import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
@@ -375,9 +376,18 @@ Widget buildConnectionCard(Client client) {
       children: [
         _CmHeader(client: client),
         Expanded(
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: _CmControlPanel(client: client),
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              key: ValueKey('incoming-controls-scroll-${client.id}'),
+              reverse: true,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: _CmControlPanel(client: client),
+                ),
+              ),
+            ),
           ),
         ),
       ],
@@ -458,7 +468,9 @@ class _CmHeaderState extends State<_CmHeader>
         gradient: LinearGradient(
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
-          colors: [Color(0xff00bfe1), Color(0xff0071ff)],
+          colors: !client.disconnected && client.type_() == ClientType.remote
+              ? [Color(0xffc53649), Color(0xff8d2432)]
+              : [Color(0xff00bfe1), Color(0xff0071ff)],
         ),
       ),
       margin: EdgeInsets.symmetric(horizontal: 5.0, vertical: 10.0),
@@ -472,6 +484,21 @@ class _CmHeaderState extends State<_CmHeader>
               mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (!client.disconnected && client.type_() == ClientType.remote)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      subnetText(context, '正在被远程控制', 'Remote control active'),
+                      key: const ValueKey('incoming-remote-control-active'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
                 FittedBox(
                   child: Text(
                     client.name,
@@ -781,6 +808,21 @@ class _CmControlPanel extends StatelessWidget {
             ),
           ],
         ),
+        if (model.clients.where((client) => !client.disconnected).length > 1)
+          buildButton(
+            context,
+            color: Colors.red.shade800,
+            onClick: () async {
+              final ids = model.clients
+                  .where((client) => !client.disconnected)
+                  .map((client) => client.id)
+                  .toList();
+              await Future.wait(ids.map((id) => bind.cmCloseConnection(connId: id)));
+            },
+            text: subnetText(context, '断开全部连接', 'Disconnect all sessions'),
+            icon: const Icon(Icons.link_off_rounded, color: Colors.white, size: 14),
+            textColor: Colors.white,
+          ),
       ],
     ).marginOnly(bottom: buttonBottomMargin);
   }
@@ -814,22 +856,15 @@ class _CmControlPanel extends StatelessWidget {
     GestureTapDownCallback? onTapDown,
   }) {
     assert(!(onClick == null && onTapDown == null));
-    Widget textWidget;
-    if (icon != null) {
-      textWidget = Text(
+    final textWidget = Expanded(
+      child: Text(
         translate(text),
         style: TextStyle(color: textColor),
         textAlign: TextAlign.center,
-      );
-    } else {
-      textWidget = Expanded(
-        child: Text(
-          translate(text),
-          style: TextStyle(color: textColor),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
     final borderRadius = BorderRadius.circular(10.0);
     final btn = Container(
       height: 28,

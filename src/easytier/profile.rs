@@ -354,9 +354,11 @@ pub(super) fn patch(toml: &str, update: Option<Patch>) -> Result<String> {
     Ok(patched)
 }
 
-pub(super) fn launch_toml(toml: &str, instance_id: Uuid) -> Result<String> {
+pub(super) fn launch_toml(toml: &str, instance_id: Uuid, hostname: &str) -> Result<String> {
     let mut doc = parse(toml)?;
     // 运行用 ID 与方案 ID 解耦，防止把同端口上的其他实例误认成当前实例。
     doc.as_table_mut().insert("instance_id", value(instance_id.to_string()));
+    // 节点统一使用「本机」显示名称，方案文件中的 hostname 不覆盖应用名称。
+    doc.as_table_mut().insert("hostname", value(hostname));
     Ok(doc.to_string())
 }

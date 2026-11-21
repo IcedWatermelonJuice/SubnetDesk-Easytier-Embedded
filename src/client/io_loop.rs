@@ -2386,9 +2386,22 @@ impl<T: InvokeUiSession> Remote<T> {
             self.handler.lc.write().unwrap().record_state = false;
         }
         let state = self.handler.lc.read().unwrap().record_state;
-        let start = state && permission;
+        let mut start = state && permission;
         if self.last_record_state == start {
             return;
+        }
+        if start {
+            let directory = crate::ui_interface::video_save_directory(false);
+            let writable = std::fs::create_dir_all(&directory)
+                .and_then(|_| tempfile::NamedTempFile::new_in(&directory).map(|_| ()));
+            if let Err(error) = writable {
+                self.handler.lc.write().unwrap().record_state = false;
+                start = false;
+                log::error!("Recording directory is not writable: {error}");
+                self.handler.msgbox("error", "录屏失败", &format!(
+                    "无法写入录屏目录：{directory}\n错误：{error}"
+                ), "");
+            }
         }
         self.last_record_state = start;
         log::info!("record screen start: {start}");

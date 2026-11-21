@@ -94,6 +94,7 @@ pub(super) struct Running {
     child: ManagedChild,
     pub profile_id: Uuid,
     pub profile_toml: String,
+    pub hostname: String,
     started: Instant,
     addr: SocketAddrV4,
     instance_id: Uuid,
@@ -242,6 +243,7 @@ impl Running {
         profile_toml: String,
         instance_id: Uuid,
         config: String,
+        hostname: String,
     ) -> Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| "无法选择 EasyTier 本机管理端口。")?;
@@ -276,6 +278,7 @@ impl Running {
             child,
             profile_id,
             profile_toml,
+            hostname,
             started: Instant::now(),
             addr,
             instance_id,

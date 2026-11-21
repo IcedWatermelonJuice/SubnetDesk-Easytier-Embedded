@@ -9,12 +9,13 @@ use std::{
 };
 use winapi::{
     shared::{
-        minwindef::{BOOL, FALSE, LPARAM, TRUE},
+        minwindef::{BOOL, FALSE, LPARAM, LRESULT, TRUE, UINT, WPARAM},
         ntdef::{HANDLE, NULL},
-        windef::{HDC, HMONITOR, HWND, RECT},
+        windef::{HBRUSH, HDC, HMONITOR, HWND, RECT},
     },
     um::{
         handleapi::CloseHandle,
+        wingdi::{GetStockObject, BLACK_BRUSH},
         libloaderapi::{GetModuleHandleA, GetProcAddress},
         memoryapi::{VirtualAllocEx, WriteProcessMemory},
         processthreadsapi::{
@@ -76,6 +77,7 @@ pub struct PrivacyModeImpl {
     conn_id: i32,
     handlers: WindowHandlers,
     hwnd: u64,
+    native_hwnd: u64,
 }
 
 impl PrivacyMode for PrivacyModeImpl {
@@ -97,19 +99,16 @@ impl PrivacyMode for PrivacyModeImpl {
             return Ok(true);
         }
 
-        let exe_file = std::env::current_exe()?;
-        if let Some(cur_dir) = exe_file.parent() {
+        if !crate::desktop_runtime::is_host() {
+            let exe_file = std::env::current_exe()?;
+            let cur_dir = exe_file.parent().ok_or_else(||
+                hbb_common::anyhow::anyhow!("Invalid executable directory"))?;
             if !cur_dir.join("WindowInjection.dll").exists() {
-                return Ok(false);
+                bail!("隐私屏组件 WindowInjection.dll 缺失，请更新完整应用包。");
             }
-        } else {
-            bail!(
-                "Invalid exe parent for {}",
-                exe_file.to_string_lossy().as_ref()
-            );
         }
 
-        let should_start_broker = self.handlers.is_default();
+        let should_start_broker = self.handlers.is_default() && self.native_hwnd == 0;
         if should_start_broker {
             log::info!("turn_on_privacy, broker not running, try start");
             self.start()?;
@@ -180,6 +179,7 @@ impl PrivacyModeImpl {
                 hprocess: 0,
             },
             hwnd: 0,
+            native_hwnd: 0,
         }
     }
 
@@ -189,6 +189,12 @@ impl PrivacyModeImpl {
     }
 
     pub fn start(&mut self) -> ResultType<()> {
+        if crate::desktop_runtime::is_host() {
+            if self.native_hwnd == 0 {
+                self.native_hwnd = start_native_privacy_window()?;
+            }
+            return Ok(());
+        }
         if self.handlers.hprocess != 0 {
             return Ok(());
         }
@@ -319,6 +325,14 @@ impl PrivacyModeImpl {
 
     #[inline]
     pub fn stop(&mut self) {
+        if self.native_hwnd != 0 {
+            unsafe {
+                if FALSE == PostMessageA(self.native_hwnd as HWND, WM_CLOSE, 0, 0) {
+                    log::error!("Failed to close native privacy window: {}", Error::last_os_error());
+                }
+            }
+            self.native_hwnd = 0;
+        }
         self.handlers.reset();
     }
 
@@ -371,6 +385,83 @@ impl Drop for PrivacyModeImpl {
         if self.conn_id != INVALID_PRIVACY_MODE_CONN_ID {
             allow_err!(self.turn_off_privacy(self.conn_id, None));
         }
+        self.stop();
+    }
+}
+
+// 交互宿主自己创建隐私窗，无需系统服务令牌或向 RuntimeBroker 注入 DLL。
+fn start_native_privacy_window() -> ResultType<u64> {
+    if !super::win_exclude_from_capture::is_supported() {
+        bail!("当前 Windows 不支持便携隐私屏，需要 Windows 10 2004 或更新版本。");
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new().name("privacy-window".into()).spawn(move || {
+        let create = || -> ResultType<HWND> { unsafe {
+            let instance = GetModuleHandleA(std::ptr::null());
+            let class_name = CString::new(PRIVACY_WINDOW_CLASS)?;
+            let window_name = CString::new(PRIVACY_WINDOW_NAME)?;
+            let class = WNDCLASSA {
+                lpfnWndProc: Some(native_privacy_window_proc),
+                hInstance: instance,
+                hbrBackground: GetStockObject(BLACK_BRUSH as _) as HBRUSH,
+                lpszClassName: class_name.as_ptr(),
+                ..std::mem::zeroed()
+            };
+            if RegisterClassA(&class) == 0
+                && winapi::um::errhandlingapi::GetLastError() != winapi::shared::winerror::ERROR_CLASS_ALREADY_EXISTS
+            {
+                bail!("无法注册隐私屏窗口：{}", Error::last_os_error());
+            }
+            let hwnd = CreateWindowExA(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                class_name.as_ptr(), window_name.as_ptr(), WS_POPUP,
+                GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null_mut(),
+            );
+            if hwnd.is_null() { bail!("无法创建隐私屏窗口：{}", Error::last_os_error()); }
+            // 先确认排除屏幕采集成功，再允许黑窗显示；失败时不遮挡屏幕。
+            if FALSE == SetWindowDisplayAffinity(hwnd, 0x00000011) {
+                let error = Error::last_os_error();
+                DestroyWindow(hwnd);
+                bail!("无法从屏幕采集中排除隐私屏：{error}");
+            }
+            Ok(hwnd)
+        }};
+        match create() {
+            Ok(hwnd) => unsafe {
+                if tx.send(Ok(hwnd as u64)).is_err() {
+                    DestroyWindow(hwnd);
+                    return;
+                }
+                let mut message = std::mem::zeroed();
+                while GetMessageA(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
+                    TranslateMessage(&message);
+                    DispatchMessageA(&message);
+                }
+                if IsWindow(hwnd) != FALSE { DestroyWindow(hwnd); }
+            },
+            Err(error) => { let _ = tx.send(Err(error)); }
+        }
+    })?;
+    rx.recv_timeout(Duration::from_secs(3))
+        .map_err(|error| hbb_common::anyhow::anyhow!("创建隐私屏窗口超时：{error}"))?
+}
+
+unsafe extern "system" fn native_privacy_window_proc(hwnd: HWND, message: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match message {
+        WM_RUSTDESK_SHOW_WINDOWS | WM_DISPLAYCHANGE => {
+            SetWindowPos(hwnd, HWND_TOPMOST,
+                GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                SWP_NOACTIVATE);
+            if message == WM_RUSTDESK_SHOW_WINDOWS { ShowWindow(hwnd, SW_SHOWNOACTIVATE); }
+            0
+        },
+        WM_RUSTDESK_HIDE_WINDOWS => { ShowWindow(hwnd, SW_HIDE); 0 },
+        WM_CLOSE => { DestroyWindow(hwnd); 0 },
+        WM_DESTROY => { PostQuitMessage(0); 0 },
+        _ => DefWindowProcA(hwnd, message, wparam, lparam),
     }
 }
 

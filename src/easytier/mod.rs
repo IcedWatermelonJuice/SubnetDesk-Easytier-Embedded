@@ -254,7 +254,7 @@ impl Worker {
         view.state = self.state;
         view.running_id = self.running.as_ref().map(|running| running.profile_id);
         view.running_config_changed = self.running.as_ref().is_some_and(|running| {
-            self.store.get(running.profile_id)
+            running.hostname != crate::lan::device_display_name() || self.store.get(running.profile_id)
                 .is_ok_and(|saved| saved.toml != running.profile_toml)
         });
         view.snapshot = Arc::clone(&self.snapshot);
@@ -418,15 +418,16 @@ impl Worker {
 
     fn start(&mut self, id: Uuid) -> Result<()> {
         let profile = self.store.get(id)?.clone();
+        let hostname = crate::lan::device_display_name();
         if self.running.as_ref().is_some_and(|running| {
-            running.profile_id == id && running.profile_toml == profile.toml
+            running.profile_id == id && running.profile_toml == profile.toml && running.hostname == hostname
         }) {
             return Ok(());
         }
         let components = Components::locate()?;
         components.verify_versions()?;
         let instance_id = Uuid::new_v4();
-        let config = profile::launch_toml(&profile.toml, instance_id)?;
+        let config = profile::launch_toml(&profile.toml, instance_id, &hostname)?;
         // 目标方案校验成功后再停止当前实例。
         components.validate(&config)?;
         if SHUTTING_DOWN.load(Ordering::Acquire) {
@@ -434,7 +435,7 @@ impl Worker {
         }
 
         self.stop()?;
-        match Running::start(components, id, profile.toml, instance_id, config) {
+        match Running::start(components, id, profile.toml, instance_id, config, hostname) {
             Ok(running) => {
                 self.running = Some(running);
                 self.state = State::Starting;

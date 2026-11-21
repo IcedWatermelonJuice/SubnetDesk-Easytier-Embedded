@@ -2190,6 +2190,69 @@ pub fn is_elevated(process_id: Option<DWORD>) -> ResultType<bool> {
     }
 }
 
+/// 取得当前交互用户的 UAC 非提升主令牌，供普通远程终端使用。
+/// 返回句柄由调用方关闭；没有可验证的同用户非提升令牌时拒绝降级。
+pub(crate) fn get_current_user_limited_token() -> ResultType<HANDLE> {
+    use base::platform::windows::RAIIHandle;
+    use winapi::um::{
+        securitybaseapi::DuplicateTokenEx,
+        winnt::{TokenLinkedToken, TokenPrimary, TokenSessionId, TOKEN_ASSIGN_PRIMARY,
+            TOKEN_DUPLICATE, TOKEN_LINKED_TOKEN},
+    };
+
+    unsafe {
+        let mut current: HANDLE = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut current) == FALSE {
+            return Err(io::Error::last_os_error().into());
+        }
+        let _current = RAIIHandle(current);
+        let mut linked: TOKEN_LINKED_TOKEN = mem::zeroed();
+        let mut length = 0;
+        if GetTokenInformation(current, TokenLinkedToken,
+            &mut linked as *mut _ as *mut c_void,
+            mem::size_of::<TOKEN_LINKED_TOKEN>() as DWORD, &mut length) == FALSE
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        let _linked = RAIIHandle(linked.LinkedToken);
+        let mut elevation: TOKEN_ELEVATION = mem::zeroed();
+        if GetTokenInformation(linked.LinkedToken, TokenElevation,
+            &mut elevation as *mut _ as *mut c_void,
+            mem::size_of::<TOKEN_ELEVATION>() as DWORD, &mut length) == FALSE
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        if elevation.TokenIsElevated != 0 {
+            bail!("Linked terminal token is elevated");
+        }
+        let current_user_buffer = read_token_user_buffer(WinHANDLE(current as _), "current")?;
+        let linked_user_buffer = read_token_user_buffer(WinHANDLE(linked.LinkedToken as _), "linked")?;
+        let current_user = std::ptr::read_unaligned(current_user_buffer.as_ptr() as *const TOKEN_USER);
+        let linked_user = std::ptr::read_unaligned(linked_user_buffer.as_ptr() as *const TOKEN_USER);
+        if EqualSid(current_user.User.Sid.0 as _, linked_user.User.Sid.0 as _) == FALSE {
+            bail!("Linked terminal token belongs to a different user");
+        }
+        let mut session: DWORD = 0;
+        if GetTokenInformation(linked.LinkedToken, TokenSessionId,
+            &mut session as *mut _ as *mut c_void,
+            mem::size_of::<DWORD>() as DWORD, &mut length) == FALSE
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        if session == 0 || Some(session) != get_current_process_session_id() {
+            bail!("Linked terminal token belongs to a different session");
+        }
+        let mut primary: HANDLE = null_mut();
+        if DuplicateTokenEx(linked.LinkedToken,
+            TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY, null_mut(),
+            SecurityImpersonation, TokenPrimary, &mut primary) == FALSE
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        Ok(primary)
+    }
+}
+
 #[inline]
 unsafe fn read_token_user_buffer(token: WinHANDLE, subject: &str) -> ResultType<Vec<u8>> {
     let mut token_user_size = 0u32;

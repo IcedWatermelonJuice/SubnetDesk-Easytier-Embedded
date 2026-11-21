@@ -83,7 +83,8 @@ class _RemotePageState extends State<RemotePage>
   late RxBool _keyboardEnabled;
   final _uniqueKey = UniqueKey();
 
-  var _blockableOverlayState = BlockableOverlayState();
+  final _blockableOverlayState = BlockableOverlayState();
+  bool _imageReady = false;
 
   final FocusNode _rawKeyFocusNode = FocusNode(debugLabel: "rawkeyFocusNode");
 
@@ -427,14 +428,7 @@ class _RemotePageState extends State<RemotePage>
     }
   }
 
-  Widget emptyOverlay() => BlockableOverlay(
-        /// the Overlay key will be set with _blockableOverlayState in BlockableOverlay
-        /// see override build() in [BlockableOverlay]
-        state: _blockableOverlayState,
-        underlying: Container(
-          color: Colors.transparent,
-        ),
-      );
+  Widget emptyOverlay() => const SizedBox.shrink();
 
   Widget buildBody(BuildContext context) {
     remoteToolbar(BuildContext context) => RemoteToolbar(
@@ -527,7 +521,7 @@ class _RemotePageState extends State<RemotePage>
       body: Obx(() {
         final imageReady = _ffi.ffiModel.pi.isSet.isTrue &&
             _ffi.ffiModel.waitForFirstImage.isFalse;
-        if (imageReady) {
+        if (imageReady && !_imageReady) {
           // If the privacy mode(disable physical displays) is switched,
           // we should not dismiss the dialog immediately.
           if (DateTime.now().difference(togglePrivacyModeTime) >
@@ -535,20 +529,14 @@ class _RemotePageState extends State<RemotePage>
             // `dismissAll()` is to ensure that the state is clean.
             // It's ok to call dismissAll() here.
             _ffi.dialogManager.dismissAll();
-            // Recreate the block state to refresh the state.
-            _blockableOverlayState = BlockableOverlayState();
-            _blockableOverlayState.applyFfi(_ffi);
           }
-          // Block the whole `bodyWidget()` when dialog shows.
-          return BlockableOverlay(
-            underlying: bodyWidget(),
-            state: _blockableOverlayState,
-          );
-        } else {
-          // `_blockableOverlayState` is not recreated here.
-          // The toolbar's block state won't work properly when reconnecting, but that's okay.
-          return bodyWidget();
         }
+        _imageReady = imageReady;
+        // 整个会话保持同一 Overlay，避免画面状态更新销毁聊天窗口及弹窗。
+        return BlockableOverlay(
+          underlying: Obx(() => bodyWidget()),
+          state: _blockableOverlayState,
+        );
       }),
     );
   }

@@ -404,13 +404,7 @@ class ServerModel with ChangeNotifier {
     Future.delayed(Duration.zero, () async {
       if (!hideCm) windowOnTop(null);
     });
-    // Only do the hidden task when on Desktop.
-    if (isDesktop) {
-      cmHiddenTimer = Timer(const Duration(seconds: 3), () {
-        if (!hideCm) windowManager.minimize();
-        cmHiddenTimer = null;
-      });
-    }
+    // 保持被控提示与断开入口可见，窗口只由本机用户主动最小化。
     parent.target?.chatModel
         .updateConnIdOfKey(MessageKey(client.peerId, client.id));
   }

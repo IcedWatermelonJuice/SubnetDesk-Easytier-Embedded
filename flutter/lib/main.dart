@@ -304,13 +304,9 @@ void runMultiWindow(Map<String, dynamic> argument, String appType) async {
 void runConnectionManagerScreen() async {
   await initEnv(kAppTypeConnectionManager);
   _runApp('', const DesktopServerPage(), MyTheme.currentThemeMode());
-  final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
-  gFFI.serverModel.hideCm = hide;
-  if (hide) {
-    await hideCmWindow(isStartup: true);
-  } else {
-    await showCmWindow(isStartup: true);
-  }
+  // 入站连接必须有可见的本机管理入口，不沿用旧的隐藏控制面板选项。
+  gFFI.serverModel.hideCm = false;
+  await showCmWindow(isStartup: true);
   setResizable(false);
   // Start the uni links handler and redirect links to Native, not for Flutter.
   listenUniLinks(handleByFlutter: false);
