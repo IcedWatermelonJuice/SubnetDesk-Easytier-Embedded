@@ -467,6 +467,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
   String? _group;
   WorkspaceDevice? _detail;
   final _deviceListScroll = ScrollController();
+  final _homeDeviceScroll = ScrollController();
 
   String t(String zh, String en) => subnetText(context, zh, en);
   bool get _isFavorite => _filter == 1;
@@ -499,6 +500,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
   @override
   void dispose() {
     _deviceListScroll.dispose();
+    _homeDeviceScroll.dispose();
     super.dispose();
   }
 
@@ -926,82 +928,80 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                   ),
                 ),
               ),
-              Flexible(
+              Expanded(
                 flex: 2,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.bottomCenter,
-                  child: SizedBox(
-                    width: contentWidth,
-                    child: Column(
-                      key: const ValueKey('workspace-nearby-section'),
-                      children: [
-                        const Divider(height: 24),
-                        _nearbyHeading(),
-                        const SizedBox(height: 10),
-                        if (_homeSource == easyTierDeviceSource && widget.easyTier != null)
-                          EasyTierNodeList(
-                            controller: widget.easyTier!,
-                            maxItems: twoColumns ? 2 : 1,
-                            onFill: _fillEasyTierIp,
-                          )
-                        else if (homeDevices.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            child: Text(
-                              _homeSource == 1 ? t('还没有收藏设备', 'No favorite devices yet') : t(
-                                '尚未发现设备，可刷新或通过地址连接',
-                                'No devices discovered. Refresh or connect by address.',
-                              ),
-                            ),
-                          )
-                        else
-                          Wrap(
-                            spacing: 16,
-                            runSpacing: 12,
-                            children: [
-                              for (final peer in homeDevices.take(
-                                twoColumns ? 2 : 1,
-                              ))
-                                SizedBox(
-                                  width: twoColumns
-                                      ? (contentWidth - 16) / 2
-                                      : contentWidth,
-                                  child: Material(
-                                    key: ValueKey(
-                                      'workspace-nearby-device-${peer.id}',
-                                    ),
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.surface,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      side: BorderSide(
-                                        color: Theme.of(context).dividerColor,
-                                      ),
-                                    ),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(6),
-                                      child: _deviceRow(
-                                        peer,
-                                        compact: true,
-                                        dense: true,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                      ],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  key: const ValueKey('workspace-nearby-section'),
+                  children: [
+                    const Divider(height: 24),
+                    _nearbyHeading(),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: Scrollbar(
+                        controller: _homeDeviceScroll,
+                        child: SingleChildScrollView(
+                          key: const ValueKey('workspace-home-device-scroll'),
+                          controller: _homeDeviceScroll,
+                          child: _homeDeviceList(homeDevices, twoColumns, contentWidth),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _homeDeviceList(
+    List<WorkspaceDevice> devices,
+    bool twoColumns,
+    double width,
+  ) {
+    if (_homeSource == easyTierDeviceSource && widget.easyTier != null) {
+      return EasyTierNodeList(
+        controller: widget.easyTier!,
+        onFill: _fillEasyTierIp,
+      );
+    }
+    if (devices.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Text(
+          _homeSource == 1
+              ? t('还没有收藏设备', 'No favorite devices yet')
+              : t('尚未发现设备，可刷新或通过地址连接',
+                  'No devices discovered. Refresh or connect by address.'),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    return Wrap(
+      spacing: 16,
+      runSpacing: 12,
+      children: [
+        for (final peer in devices)
+          SizedBox(
+            width: twoColumns ? (width - 16) / 2 : width,
+            child: Material(
+              key: ValueKey('workspace-nearby-device-${peer.id}'),
+              color: Theme.of(context).colorScheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: Theme.of(context).dividerColor),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: _deviceRow(peer, compact: true, dense: true),
+              ),
+            ),
+          ),
+      ],
     );
   }
 

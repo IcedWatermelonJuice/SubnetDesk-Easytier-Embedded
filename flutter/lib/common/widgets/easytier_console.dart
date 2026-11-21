@@ -551,11 +551,10 @@ String _networkStateMessage(BuildContext context, String state) => switch (state
 };
 
 class EasyTierNodeList extends StatelessWidget {
-  const EasyTierNodeList({super.key, required this.controller, this.onFill, this.maxItems});
+  const EasyTierNodeList({super.key, required this.controller, this.onFill});
 
   final EasyTierController controller;
   final ValueChanged<String>? onFill;
-  final int? maxItems;
 
   @override
   Widget build(BuildContext context) {
@@ -569,7 +568,7 @@ class EasyTierNodeList extends StatelessWidget {
     }
     return Column(
       children: [
-        for (final node in nodes.take(maxItems ?? nodes.length)) _row(context, node),
+        for (final node in nodes) _row(context, node),
       ],
     );
   }
