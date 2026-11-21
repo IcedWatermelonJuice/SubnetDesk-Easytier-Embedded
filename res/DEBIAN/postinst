@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+if [ "$1" = configure ]; then
+    ln -f -s /usr/share/subnetdesk/subnetdesk /usr/bin/subnetdesk
+fi
