@@ -8,6 +8,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:path/path.dart' as path;
 
 import 'subnet_ui.dart';
+import 'easytier_network_cards.dart';
 
 typedef _Entry = Map<String, dynamic>;
 
@@ -226,9 +227,10 @@ Future<bool> _confirm(BuildContext context, String title, String body) async =>
     false;
 
 class EasyTierConsole extends StatefulWidget {
-  const EasyTierConsole({super.key, required this.controller});
+  const EasyTierConsole({super.key, required this.controller, this.onFill});
 
   final EasyTierController controller;
+  final ValueChanged<String>? onFill;
 
   @override
   State<EasyTierConsole> createState() => _EasyTierConsoleState();
@@ -236,7 +238,6 @@ class EasyTierConsole extends StatefulWidget {
 
 class _EasyTierConsoleState extends State<EasyTierConsole> {
   EasyTierController get controller => widget.controller;
-  bool _showRoutes = false;
 
   String t(String zh, String en) => _text(context, zh, en);
 
@@ -344,6 +345,7 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
         (controller.runningId != selectedId || controller.runningConfigChanged);
     final canStop = !controller.busy && controller.state == 'running';
     final title = Theme.of(context).textTheme;
+    final compact = MediaQuery.sizeOf(context).width < 700;
     final queriedAt = controller.queriedAt;
     final queryTime = queriedAt == null
         ? null
@@ -372,7 +374,7 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1040),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(32, 12, 32, 32),
+          padding: EdgeInsets.fromLTRB(compact ? 16 : 32, 12, compact ? 16 : 32, 32),
           children: [
             Text(t('组网', 'Network'), style: title.headlineSmall),
             const SizedBox(height: 12),
@@ -406,7 +408,7 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 SizedBox(
-                  width: 260,
+                  width: compact ? MediaQuery.sizeOf(context).width - 88 : 260,
                   child: MenuAnchor(
                     alignmentOffset: const Offset(0, 6),
                     style: MenuStyle(
@@ -451,16 +453,16 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
                     ),
                   ),
                 ),
-                FilledButton(
+                if (!compact) FilledButton(
                   onPressed: controller.busy ? null : () => _edit(),
                   child: Text(t('新建', 'New')),
                 ),
-                OutlinedButton(
+                if (!compact) OutlinedButton(
                   onPressed: controller.busy ? null : _import,
                   child: Text(t('导入 TOML', 'Import TOML')),
                 ),
-                if (selected != null) ...[
-                  OutlinedButton(
+                if (selected != null || compact) ...[
+                  if (!compact && selected != null) OutlinedButton(
                     onPressed: controller.busy ? null : () => _edit(_string(selectedId)),
                     child: Text(t('编辑', 'Edit')),
                   ),
@@ -469,25 +471,38 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
                     tooltip: t('方案操作', 'Profile actions'),
                     onSelected: (action) {
                       switch (action) {
+                        case 'new':
+                          _edit();
+                        case 'import':
+                          _import();
+                        case 'edit':
+                          _edit(_string(selectedId));
                         case 'rename':
-                          _rename(selected);
+                          if (selected != null) _rename(selected);
                         case 'copy':
-                          _copy(selected);
+                          if (selected != null) _copy(selected);
                         case 'delete':
-                          _delete(selected);
+                          if (selected != null) _delete(selected);
                         case 'export':
-                          _export(selected);
+                          if (selected != null) _export(selected);
                       }
                     },
                     itemBuilder: (_) => [
-                      PopupMenuItem(value: 'rename', child: Text(t('重命名', 'Rename'))),
-                      PopupMenuItem(value: 'copy', child: Text(t('复制', 'Duplicate'))),
-                      PopupMenuItem(value: 'export', child: Text(t('导出 TOML', 'Export TOML'))),
-                      PopupMenuItem(
+                      if (compact) ...[
+                        PopupMenuItem(value: 'new', child: Text(t('新建方案', 'New profile'))),
+                        PopupMenuItem(value: 'import', child: Text(t('导入 TOML', 'Import TOML'))),
+                        if (selected != null) PopupMenuItem(value: 'edit', child: Text(t('编辑方案', 'Edit profile'))),
+                      ],
+                      if (selected != null) ...[
+                        PopupMenuItem(value: 'rename', child: Text(t('重命名', 'Rename'))),
+                        PopupMenuItem(value: 'copy', child: Text(t('复制', 'Duplicate'))),
+                        PopupMenuItem(value: 'export', child: Text(t('导出 TOML', 'Export TOML'))),
+                        PopupMenuItem(
                         value: 'delete',
                         enabled: controller.runningId != selectedId,
                         child: Text(t('删除', 'Delete')),
-                      ),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -511,62 +526,24 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
               ],
             ),
             const SizedBox(height: 24),
-            Wrap(
-              spacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                ChoiceChip(
-                  label: Text(t('节点', 'Nodes')),
-                  selected: !_showRoutes,
-                  onSelected: (_) => setState(() => _showRoutes = false),
-                ),
-                ChoiceChip(
-                  label: Text(t('路由', 'Routes')),
-                  selected: _showRoutes,
-                  onSelected: (_) => setState(() => _showRoutes = true),
-                ),
-                IconButton(
-                  tooltip: t('刷新', 'Refresh'),
-                  onPressed: controller.busy || controller.state != 'running'
-                      ? null
-                      : () => controller.command('refresh'),
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
+            EasyTierNetworkCards(
+              nodes: controller.addressableNodes,
+              running: controller.state == 'running',
+              stale: controller.error.isNotEmpty || queriedAt == null ||
+                  DateTime.now().difference(queriedAt) > const Duration(seconds: 15),
+              queriedAt: queriedAt,
+              onFill: widget.onFill,
+              onRefresh: controller.busy || controller.state != 'running'
+                  ? null : () => controller.command('refresh'),
+              emptyMessage: controller.state != 'running'
+                  ? _networkStateMessage(context, controller.state) : null,
             ),
-            const Divider(),
-            if (_showRoutes) ..._routeRows() else EasyTierNodeList(controller: controller),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _routeRows() {
-    if (controller.state != 'running' || controller.routes.isEmpty) {
-      return [
-        Text(controller.state != 'running'
-            ? _networkStateMessage(context, controller.state)
-            : controller.error.isNotEmpty
-            ? t('路由查询失败。', 'Could not read routes.')
-            : t('没有路由。', 'No routes.')),
-      ];
-    }
-    return [
-      for (final route in controller.routes)
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(_string(route['destination'])),
-          subtitle: Text([
-            if (_string(route['next_hop']).isNotEmpty)
-              t('下一跳 ${route['next_hop']}', 'Next hop ${route['next_hop']}'),
-            if (route['hops'] != null)
-              t('${route['hops']} 跳', '${route['hops']} hops'),
-            if (route['latency'] != null) '${route['latency']} ms',
-          ].join(' · ')),
-        ),
-    ];
-  }
 }
 
 String _networkStateMessage(BuildContext context, String state) => switch (state) {

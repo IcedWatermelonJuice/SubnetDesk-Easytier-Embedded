@@ -650,7 +650,10 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                       : switch (_navigation) {
                           1 => _deviceBrowser(),
                           2 => _local(),
-                          3 when _showEasyTier => EasyTierConsole(controller: widget.easyTier!),
+                          3 when _showEasyTier => EasyTierConsole(
+                            controller: widget.easyTier!,
+                            onFill: _fillEasyTierIp,
+                          ),
                           _ => _home(),
                         },
                 ),
