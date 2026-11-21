@@ -1,5 +1,8 @@
 use super::Result;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
+#[path = "network_view.rs"]
+mod network_view;
+use network_view::{build_nodes, Node, PeerRow, RouteRow};
 use std::{
     collections::HashSet,
     env,
@@ -40,43 +43,11 @@ pub(super) struct Snapshot {
 }
 
 #[derive(Serialize)]
-pub(super) struct Node {
-    name: String,
-    address: String,
-    latency: Option<f64>,
-    protocol: Option<String>,
-}
-
-#[derive(Serialize)]
 pub(super) struct Route {
     destination: String,
     next_hop: String,
     hops: Option<i32>,
     latency: Option<i32>,
-}
-
-#[derive(Deserialize)]
-struct PeerRow {
-    hostname: String,
-    ipv4: String,
-    cidr: String,
-    cost: String,
-    lat_ms: String,
-    tunnel_proto: String,
-}
-
-#[derive(Deserialize)]
-struct RouteRow {
-    ipv4: String,
-    proxy_cidrs: String,
-    next_hop_ipv4: String,
-    next_hop_hostname: String,
-    path_len: i32,
-    path_latency: i32,
-    next_hop_ipv4_lat_first: String,
-    next_hop_hostname_lat_first: String,
-    path_len_lat_first: i32,
-    path_latency_lat_first: i32,
 }
 
 struct ManagedChild(Child);
@@ -348,21 +319,7 @@ impl Running {
             queried_at: Some(chrono::Utc::now().timestamp_millis()),
             allowed_sources,
             observed_at: Some(Instant::now()),
-            nodes: peers
-                .into_iter()
-                .filter(|peer| peer.cost != "Local")
-                .take(MAX_ROWS)
-                .map(|peer| Node {
-                    name: safe_text(&peer.hostname),
-                    address: ipv4_address(&peer.ipv4).unwrap_or_default(),
-                    latency: peer.lat_ms.parse::<f64>().ok().filter(|latency| latency.is_finite()),
-                    protocol: if peer.tunnel_proto.is_empty() || peer.tunnel_proto == "-" {
-                        None
-                    } else {
-                        Some(safe_text(&peer.tunnel_proto))
-                    },
-                })
-                .collect(),
+            nodes: build_nodes(&peers, &routes, self.latency_first, MAX_ROWS),
             routes: routes
                 .iter()
                 .flat_map(|route| route.rows(self.latency_first))
