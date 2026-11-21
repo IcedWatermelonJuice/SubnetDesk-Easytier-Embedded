@@ -64,6 +64,7 @@ class EasyTierController extends ChangeNotifier {
   String get ipv4 => _string(_status['ipv4']);
   String get error => _string(_status['error']);
   bool get startingOrStopping => state == 'starting' || state == 'stopping';
+  bool get remoteOnly => _status['remote_only'] == true;
   bool get runningConfigChanged => _status['running_config_changed'] == true;
   DateTime? get queriedAt {
     final timestamp = _status['queried_at'];
@@ -116,7 +117,8 @@ class EasyTierController extends ChangeNotifier {
   }
 
   Future<bool> command(String action, [Map<String, Object?> arguments = const {}]) async {
-    if (busy || !available || _disposed) return false;
+    final canDisable = action == 'stop' || (action == 'set_remote_only' && arguments['enabled'] == false);
+    if (busy || (!available && !canDisable) || _disposed) return false;
     busy = true;
     commandFailed = false;
     lastCommandError = '';
@@ -549,10 +551,11 @@ String _networkStateMessage(BuildContext context, String state) => switch (state
 };
 
 class EasyTierNodeList extends StatelessWidget {
-  const EasyTierNodeList({super.key, required this.controller, this.onFill});
+  const EasyTierNodeList({super.key, required this.controller, this.onFill, this.maxItems});
 
   final EasyTierController controller;
   final ValueChanged<String>? onFill;
+  final int? maxItems;
 
   @override
   Widget build(BuildContext context) {
@@ -566,7 +569,7 @@ class EasyTierNodeList extends StatelessWidget {
     }
     return Column(
       children: [
-        for (final node in nodes) _row(context, node),
+        for (final node in nodes.take(maxItems ?? nodes.length)) _row(context, node),
       ],
     );
   }
@@ -616,6 +619,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
   bool _tomlTab = false;
   bool _tomlChanged = false;
   bool _saving = false;
+  bool _secretVisible = false;
   String? _error;
 
   String t(String zh, String en) => _text(context, zh, en);
@@ -678,6 +682,25 @@ class _ProfileEditorState extends State<_ProfileEditor> {
     }
   }
 
+  InputDecoration _decoration(String label, IconData icon, {Widget? suffix}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final border = dark ? Colors.white12 : const Color(0xFFE1E6EE);
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: dark ? Colors.white60 : const Color(0xFF737B8C), fontSize: 13),
+      prefixIcon: Icon(icon, size: 19),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: dark ? const Color(0xFF292C33) : const Color(0xFFF7F9FC),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: border)),
+      disabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: border)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.4)),
+      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Theme.of(context).colorScheme.error)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+    );
+  }
+
   Widget _field(
     String key,
     TextEditingController controller,
@@ -689,19 +712,50 @@ class _ProfileEditorState extends State<_ProfileEditor> {
     child: TextField(
       controller: controller,
       enabled: !_saving,
-      obscureText: secret,
+      obscureText: secret && !_secretVisible,
       autocorrect: false,
       enableSuggestions: false,
       maxLines: lines,
       onChanged: (_) => _fieldsChanged.add(key),
-      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+      decoration: _decoration(
+        label,
+        secret ? Icons.lock_outline_rounded : key == 'network_name' ? Icons.hub_outlined : key == 'peers' ? Icons.route_outlined : Icons.lan_outlined,
+        suffix: secret ? IconButton(
+          tooltip: _secretVisible ? t('隐藏密码', 'Hide password') : t('显示密码', 'Show password'),
+          onPressed: _saving ? null : () => setState(() => _secretVisible = !_secretVisible),
+          icon: Icon(_secretVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+        ) : null,
+      ),
     ),
   );
 
   @override
   Widget build(BuildContext context) => AlertDialog(
     scrollable: true,
-    title: Text(widget.profile == null ? t('新建方案', 'New profile') : t('编辑方案', 'Edit profile')),
+    backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF202228) : Colors.white,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    titlePadding: const EdgeInsets.fromLTRB(24, 22, 16, 18),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+    actionsPadding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+    title: Row(
+      children: [
+        Container(
+          width: 42, height: 42,
+          decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withValues(alpha: .10), borderRadius: BorderRadius.circular(12)),
+          child: Icon(Icons.hub_outlined, color: Theme.of(context).colorScheme.primary, size: 23),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('EasyTier · ${t('配置', 'Settings')}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 3),
+            Text(widget.profile == null ? t('新建组网方案', 'New network profile') : t('编辑组网方案', 'Edit network profile'), style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+          ],
+        )),
+        IconButton(tooltip: t('关闭', 'Close'), onPressed: _saving ? null : () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
+      ],
+    ),
     content: SizedBox(
       width: 620,
       child: Form(
@@ -713,10 +767,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
             TextFormField(
               controller: _name,
               enabled: !_saving,
-              decoration: InputDecoration(
-                labelText: t('方案名称', 'Profile name'),
-                border: const OutlineInputBorder(),
-              ),
+              decoration: _decoration(t('方案名称', 'Profile name'), Icons.badge_outlined),
               validator: (v) => v?.trim().isNotEmpty == true
                   ? null
                   : t('请输入方案名称。', 'Enter a profile name.'),
@@ -750,25 +801,35 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                 autocorrect: false,
                 enableSuggestions: false,
                 style: const TextStyle(fontFamily: 'monospace'),
-                decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'TOML'),
+                decoration: _decoration('TOML', Icons.code_rounded),
               ),
             ] else ...[
               _field('network_name', _network, t('网络名称', 'Network name')),
               _field('secret', _secret, t('网络密钥', 'Network secret'), secret: true),
               _field('peers', _peers, t('引导节点（每行一个地址）', 'Bootstrap peers (one per line)'), lines: 2),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF292C33) : const Color(0xFFF7F9FC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white12 : const Color(0xFFE1E6EE)),
+                ),
+                child: SwitchListTile.adaptive(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                secondary: const Icon(Icons.auto_awesome_outlined, size: 20),
                 title: Text(t('自动分配虚拟 IP', 'Assign virtual IP automatically')),
+                subtitle: const Text('DHCP'),
                 value: _dhcp,
                 onChanged: _saving ? null : (value) => setState(() {
                   _dhcp = value;
                   _fieldsChanged.add('dhcp');
                 }),
-              ),
+              )),
               if (!_dhcp) _field('ipv4', _ipv4, t('固定虚拟 IPv4', 'Static virtual IPv4')),
             ],
             if (_error != null)
               Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            const Divider(height: 28),
           ],
         ),
       ),
@@ -778,7 +839,12 @@ class _ProfileEditorState extends State<_ProfileEditor> {
         onPressed: _saving ? null : () => Navigator.pop(context),
         child: Text(t('取消', 'Cancel')),
       ),
-      FilledButton(onPressed: _saving ? null : _save, child: Text(t('保存', 'Save'))),
+      FilledButton.icon(
+        onPressed: _saving ? null : _save,
+        icon: _saving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check_rounded, size: 18),
+        label: Text(t('保存', 'Save')),
+        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))),
+      ),
     ],
   );
 }

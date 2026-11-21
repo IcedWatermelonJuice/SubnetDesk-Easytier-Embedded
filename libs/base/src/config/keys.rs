@@ -53,6 +53,7 @@ pub const OPTION_ALLOW_SCOPE_VIOLATION_ALARM: &str = "allow-scope-violation-alar
 pub const OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION: &str = "allow-remote-config-modification";
 pub const OPTION_LAN_DEVICE_ADDRESSES: &str = "lan-device-addresses";
 pub const OPTION_ENABLE_LAN_DISCOVERY: &str = "lan-discovery-enabled";
+pub const OPTION_LAN_EASYTIER_ONLY: &str = "lan-easytier-only";
 pub const OPTION_WEB_ACCESS_ENABLED: &str = "web-access-enabled";
 pub const OPTION_WEB_LISTEN_PORT: &str = "web-listen-port";
 pub const OPTION_WEB_HTTPS_ENABLED: &str = "web-https-enabled";

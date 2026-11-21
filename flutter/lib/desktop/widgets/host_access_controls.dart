@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../common/widgets/subnet_ui.dart';
+import '../../common/widgets/easytier_console.dart';
 import '../host_access_state.dart';
 
 /// Homepage controls for this computer, with an anchored prerequisite guide.
@@ -15,6 +16,8 @@ class HostAccessControls extends StatefulWidget {
     required this.onDiscoveryChanged,
     required this.onRemoteChanged,
     required this.onConfigure,
+    this.easyTier,
+    this.onOpenEasyTier,
   });
 
   final HostAccessState state;
@@ -22,6 +25,8 @@ class HostAccessControls extends StatefulWidget {
   final Future<void> Function(bool) onDiscoveryChanged;
   final Future<bool> Function(bool) onRemoteChanged;
   final VoidCallback onConfigure;
+  final EasyTierController? easyTier;
+  final VoidCallback? onOpenEasyTier;
 
   @override
   State<HostAccessControls> createState() => _HostAccessControlsState();
@@ -166,9 +171,10 @@ class _HostAccessControlsState extends State<HostAccessControls> {
     required bool value,
     required Future<void> Function(bool) changed,
     bool pending = false,
+    bool? enabledOverride,
   }) {
     final theme = Theme.of(context);
-    final enabled = !widget.state.loading && !widget.state.busy;
+    final enabled = enabledOverride ?? (!widget.state.loading && !widget.state.busy);
     const labelStyle = TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
     final statusStyle = TextStyle(
       fontSize: 11,
@@ -259,6 +265,7 @@ class _HostAccessControlsState extends State<HostAccessControls> {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
+    final easyTier = widget.easyTier;
     String status(bool enabled) => state.loading
         ? t('检查中', 'Checking')
         : state.busy
@@ -320,6 +327,55 @@ class _HostAccessControlsState extends State<HostAccessControls> {
             t('本机', 'This device'),
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
+          if (easyTier != null)
+            _toggle(
+              id: 'easytier',
+              icon: Icons.hub_outlined,
+              label: t('快速启动 EasyTier', 'Quick start EasyTier'),
+              description: t(
+                '启动上次选择的组网方案：${easyTier.profileName(easyTier.selectedId)}',
+                'Start the last selected profile: ${easyTier.profileName(easyTier.selectedId)}',
+              ),
+              status: easyTier.startingOrStopping || easyTier.busy
+                  ? t('处理中', 'Working')
+                  : easyTier.state == 'running'
+                  ? t('已开启', 'On')
+                  : easyTier.selectedId.isEmpty
+                  ? t('待配置', 'Setup required')
+                  : t('已关闭', 'Off'),
+              value: easyTier.state == 'running',
+              pending: easyTier.selectedId.isEmpty,
+              enabledOverride: !easyTier.busy && !easyTier.startingOrStopping,
+              changed: (enabled) async {
+                if (enabled) {
+                  await startSelectedEasyTier(
+                    context,
+                    easyTier,
+                    openConsole: widget.onOpenEasyTier ?? () {},
+                  );
+                } else if (!await easyTier.command('stop') && mounted) {
+                  widget.onOpenEasyTier?.call();
+                }
+              },
+            ),
+          if (easyTier != null)
+            _toggle(
+              id: 'easytier-only',
+              icon: Icons.shield_outlined,
+              label: t('仅允许 EasyTier 远控', 'EasyTier remote access only'),
+              description: t(
+                '仅接受当前 EasyTier 节点 IP。开启会启动组网；关闭组网会同时关闭此限制。已有会话不受影响。',
+                'Accept current EasyTier node IPs only. Enabling starts the network; stopping the network disables this restriction. Existing sessions are unchanged.',
+              ),
+              status: easyTier.remoteOnly ? t('已开启', 'On') : t('已关闭', 'Off'),
+              value: easyTier.remoteOnly,
+              enabledOverride: !easyTier.busy && !easyTier.startingOrStopping,
+              changed: (enabled) async {
+                if (!await easyTier.command('set_remote_only', {'enabled': enabled}) && mounted) {
+                  widget.onOpenEasyTier?.call();
+                }
+              },
+            ),
           _toggle(
             id: 'discovery',
             icon: Icons.wifi_tethering_rounded,

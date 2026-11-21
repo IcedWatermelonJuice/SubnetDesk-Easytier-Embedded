@@ -463,13 +463,14 @@ class LanWorkspace extends StatefulWidget {
 class _LanWorkspaceState extends State<LanWorkspace> {
   int _navigation = 0;
   int _filter = 0;
+  int _homeSource = 0;
   String? _group;
   WorkspaceDevice? _detail;
   final _deviceListScroll = ScrollController();
 
   String t(String zh, String en) => subnetText(context, zh, en);
   bool get _isFavorite => _filter == 1;
-  bool get _showEasyTier => !widget.mobile && widget.easyTier?.available == true;
+  bool get _showEasyTier => !widget.mobile && widget.easyTier != null;
   Set<String> get _favoriteIds => widget.favorites.map((d) => d.id).toSet();
 
   @override
@@ -542,6 +543,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
       final mobile = widget.mobile;
       widget.easyTier?.refreshVisible =
           _showEasyTier && (_navigation == 3 ||
+              (_navigation == 0 && _homeSource == easyTierDeviceSource) ||
               (_navigation == 1 && _filter == easyTierDeviceSource));
       final nav = _nav();
       return PopScope(
@@ -805,36 +807,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
     },
   );
 
-  Widget _easyTierQuickStart(EasyTierController controller) {
-    final name = controller.profileName(controller.selectedId);
-    final running = controller.runningId.isNotEmpty &&
-        controller.runningId == controller.selectedId &&
-        !controller.runningConfigChanged;
-    return TextButton.icon(
-      onPressed: controller.busy || controller.startingOrStopping
-          ? null
-          : running
-          ? () => _navigate(3)
-          : () => startSelectedEasyTier(
-              context,
-              controller,
-              openConsole: () => _navigate(3),
-            ),
-      icon: Icon(running ? Icons.hub_outlined : Icons.play_arrow_rounded),
-      label: Text(
-        running
-            ? t('EasyTier 运行中 · $name', 'EasyTier running · $name')
-            : name.isEmpty
-            ? t('启动 EasyTier', 'Start EasyTier')
-            : t('启动 EasyTier · $name', 'Start EasyTier · $name'),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-  }
-
   Widget _desktopHome(BoxConstraints box) {
     final device = _continueDevice;
+    final homeDevices = _homeSource == 1 ? widget.favorites : _orderedNearby;
     final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
     final contentWidth = math.min(box.maxWidth - 64, 1040.0);
     final twoColumns = contentWidth >= 720 && !largeText;
@@ -865,6 +840,8 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                           onRemoteChanged:
                               widget.onRemoteChanged ?? (_) async => false,
                           onConfigure: () => _navigate(2),
+                          easyTier: widget.easyTier,
+                          onOpenEasyTier: () => _navigate(3),
                         ),
                       ),
                     ),
@@ -942,7 +919,6 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                               compact: true,
                               expand: largeText,
                             ),
-                            if (_showEasyTier) _easyTierQuickStart(widget.easyTier!),
                           ],
                         ),
                       ),
@@ -963,11 +939,17 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                         const Divider(height: 24),
                         _nearbyHeading(),
                         const SizedBox(height: 10),
-                        if (_orderedNearby.isEmpty)
+                        if (_homeSource == easyTierDeviceSource && widget.easyTier != null)
+                          EasyTierNodeList(
+                            controller: widget.easyTier!,
+                            maxItems: twoColumns ? 2 : 1,
+                            onFill: _fillEasyTierIp,
+                          )
+                        else if (homeDevices.isEmpty)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             child: Text(
-                              t(
+                              _homeSource == 1 ? t('还没有收藏设备', 'No favorite devices yet') : t(
                                 '尚未发现设备，可刷新或通过地址连接',
                                 'No devices discovered. Refresh or connect by address.',
                               ),
@@ -978,7 +960,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                             spacing: 16,
                             runSpacing: 12,
                             children: [
-                              for (final peer in _orderedNearby.take(
+                              for (final peer in homeDevices.take(
                                 twoColumns ? 2 : 1,
                               ))
                                 SizedBox(
@@ -1034,18 +1016,29 @@ class _LanWorkspaceState extends State<LanWorkspace> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             TextButton(
-              onPressed: () => _navigate(1, filter: 0),
+              onPressed: () => setState(() => _homeSource = 0),
               child: Text(
                 t('附近的设备', 'Nearby devices'),
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
+                style: TextStyle(
+                  fontSize: _homeSource == 0 ? 17 : 14,
+                  fontWeight: _homeSource == 0 ? FontWeight.w600 : FontWeight.normal,
                 ),
               ),
             ),
+            if (_showEasyTier)
+              TextButton(
+                onPressed: () => setState(() => _homeSource = easyTierDeviceSource),
+                child: Text(t('EasyTier 设备', 'EasyTier devices'), style: TextStyle(
+                  fontSize: _homeSource == easyTierDeviceSource ? 17 : 14,
+                  fontWeight: _homeSource == easyTierDeviceSource ? FontWeight.w600 : FontWeight.normal,
+                )),
+              ),
             TextButton(
-              onPressed: () => _navigate(1, filter: 1),
-              child: Text(t('收藏', 'Favorites')),
+              onPressed: () => setState(() => _homeSource = 1),
+              child: Text(t('收藏', 'Favorites'), style: TextStyle(
+                fontSize: _homeSource == 1 ? 17 : 14,
+                fontWeight: _homeSource == 1 ? FontWeight.w600 : FontWeight.normal,
+              )),
             ),
           ],
         ),
@@ -1053,12 +1046,21 @@ class _LanWorkspaceState extends State<LanWorkspace> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             TextButton(
-              onPressed: () => _navigate(1),
+              onPressed: () => _navigate(1, filter: _homeSource),
               child: Text(t('查看全部', 'View all')),
             ),
             IconButton(
               tooltip: t('刷新设备', 'Refresh devices'),
-              onPressed: widget.onRefresh,
+              onPressed: () {
+                if (_homeSource == easyTierDeviceSource) {
+                  final controller = widget.easyTier;
+                  if (controller != null && controller.state == 'running' && !controller.busy) {
+                    unawaited(controller.command('refresh'));
+                  }
+                } else {
+                  widget.onRefresh();
+                }
+              },
               icon: const Icon(Icons.refresh_rounded),
             ),
           ],
