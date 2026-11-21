@@ -1407,6 +1407,7 @@ Future<void> showLanSettingsDialog(
   var webAccessEnabled = info['web_access_enabled'] == true;
   var error = '';
   var saving = false;
+  var passwordVisible = false;
 
   final route = DialogRoute<void>(
     context: context,
@@ -1425,21 +1426,21 @@ Future<void> showLanSettingsDialog(
           required String label,
           required IconData icon,
           String? help,
+          Widget? suffix,
         }) {
+          final helpIcon = help == null
+              ? null
+              : Tooltip(
+                  message: help,
+                  child: Icon(Icons.info_outline_rounded, size: 17, color: muted),
+                );
           return InputDecoration(
             labelText: label,
             labelStyle: TextStyle(color: muted, fontSize: 13),
             prefixIcon: Icon(icon, size: 19, color: muted),
-            suffixIcon: help == null
-                ? null
-                : Tooltip(
-                    message: help,
-                    child: Icon(
-                      Icons.info_outline_rounded,
-                      size: 17,
-                      color: muted,
-                    ),
-                  ),
+            suffixIcon: suffix != null && helpIcon != null
+                ? Row(mainAxisSize: MainAxisSize.min, children: [helpIcon, suffix])
+                : suffix ?? helpIcon,
             filled: true,
             fillColor: fieldFill,
             contentPadding: const EdgeInsets.symmetric(
@@ -1578,12 +1579,28 @@ Future<void> showLanSettingsDialog(
                           autofocus:
                               !credentialsConfigured &&
                               username.text.isNotEmpty,
-                          obscureText: true,
+                          obscureText: !passwordVisible,
                           autocorrect: false,
                           enableSuggestions: false,
                           decoration: fieldDecoration(
                             label: translate('Password'),
                             icon: Icons.lock_outline_rounded,
+                            suffix: IconButton(
+                              tooltip: passwordVisible
+                                  ? subnetText(context, '隐藏密码', 'Hide password')
+                                  : subnetText(context, '显示密码', 'Show password'),
+                              onPressed: saving
+                                  ? null
+                                  : () => setDialogState(() {
+                                        passwordVisible = !passwordVisible;
+                                      }),
+                              icon: Icon(
+                                passwordVisible
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                color: muted,
+                              ),
+                            ),
                             help: info['configured'] == true
                                 ? translate(
                                     'Leave blank to keep current password',
@@ -1852,6 +1869,7 @@ Future<void> showLanSettingsDialog(
                                 setDialogState(() {
                                   saving = true;
                                   error = '';
+                                  passwordVisible = false;
                                 });
                                 if (webCertificatePath.text.trim().isNotEmpty &&
                                     webAllowedHosts.text.trim().isEmpty) {

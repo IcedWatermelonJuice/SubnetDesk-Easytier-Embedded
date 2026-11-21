@@ -1256,6 +1256,10 @@ pub fn main_discover() {
 pub fn main_get_local_option(key: String) -> SyncReturn<String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if key == "desktop-runtime" { return SyncReturn(crate::desktop_runtime::state()); }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(value) = crate::easytier::get_option(&key) {
+        return SyncReturn(value);
+    }
     SyncReturn(get_local_option(key))
 }
 
@@ -1297,6 +1301,11 @@ pub fn main_set_env(key: String, value: Option<String>) -> SyncReturn<()> {
 }
 
 pub fn main_set_local_option(key: String, value: String) {
+    if key == "easytier-command" {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        crate::easytier::submit(value);
+        return;
+    }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     match key.as_str() {
         "start-on-boot" => { crate::desktop_runtime::set_autostart(value == "Y"); return; },

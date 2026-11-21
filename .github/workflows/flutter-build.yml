@@ -285,6 +285,13 @@ jobs:
           name: ${{ matrix.job.arch == 'aarch64' && 'topmostwindow-artifacts-ARM64' || 'topmostwindow-artifacts-x64' }}
           path: "./rustdesk"
 
+      - name: Stage EasyTier Windows runtime
+        if: ${{ inputs.upload-artifact && vars.SUBNETDESK_EASYTIER_WINDOWS_CORES != '' }}
+        env:
+          SUBNETDESK_EASYTIER_WINDOWS_CORES: ${{ vars.SUBNETDESK_EASYTIER_WINDOWS_CORES }}
+        run: |
+          python3 scripts/stage_windows_easytier.py --runtime ./rustdesk --arch '${{ matrix.job.arch }}'
+
       - name: Upload unsigned
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -297,7 +304,7 @@ jobs:
         shell: bash
         run: |
           pip3 install requests argparse
-          BASE_URL=${{ env.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./rustdesk/
+          BASE_URL=${{ env.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./rustdesk/ --exclude-dir easytier
 
       - name: Build self-extracted executable
         shell: bash

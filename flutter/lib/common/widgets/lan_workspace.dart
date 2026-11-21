@@ -17,6 +17,7 @@ import '../../desktop/widgets/host_access_controls.dart';
 
 import 'peer_card.dart';
 import 'device_art.dart';
+import 'easytier_console.dart';
 import 'subnet_ui.dart';
 
 part 'saved_devices_browser.dart';
@@ -106,6 +107,8 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
     with WidgetsBindingObserver, WindowListener {
   Timer? _timer;
   late final Listenable _updates;
+  late final Listenable _viewUpdates;
+  EasyTierController? _easyTier;
   bool _resumed = true;
   HostAccessState _hostAccess = const HostAccessState();
   Future<void>? _hostRefresh;
@@ -123,6 +126,10 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
       gFFI.favoritePeersModel,
       favoriteGroupModel,
     ]);
+    if (!widget.mobile && isDesktop && !bind.isIncomingOnly()) {
+      _easyTier = EasyTierController();
+    }
+    _viewUpdates = Listenable.merge([_updates, _easyTier]);
     _updates.addListener(_migrateGroupKeys);
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -236,6 +243,7 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
     WidgetsBinding.instance.removeObserver(this);
     if (isDesktop) windowManager.removeListener(this);
     _updates.removeListener(_migrateGroupKeys);
+    _easyTier?.dispose();
     _timer?.cancel();
     super.dispose();
   }
@@ -344,8 +352,9 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _updates,
+    animation: _viewUpdates,
     builder: (context, _) => LanWorkspace(
+      easyTier: _easyTier,
       mobile: widget.mobile,
       incomingOnly: bind.isIncomingOnly(),
       nearby: gFFI.lanPeersModel.peers.map(WorkspaceDevice.fromPeer).toList(),
@@ -408,6 +417,7 @@ class LanWorkspace extends StatefulWidget {
     this.mobile = false,
     this.incomingOnly = false,
     this.localPane,
+    this.easyTier,
     this.groups = const [],
     this.groupFor,
     this.onAssignGroup,
@@ -430,6 +440,7 @@ class LanWorkspace extends StatefulWidget {
   final bool mobile;
   final bool incomingOnly;
   final Widget? localPane;
+  final EasyTierController? easyTier;
   final List<FavoriteGroup> groups;
   final String? Function(String)? groupFor;
   final void Function(String, String?)? onAssignGroup;
@@ -458,6 +469,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
 
   String t(String zh, String en) => subnetText(context, zh, en);
   bool get _isFavorite => _filter == 1;
+  bool get _showEasyTier => !widget.mobile && widget.easyTier?.available == true;
   Set<String> get _favoriteIds => widget.favorites.map((d) => d.id).toSet();
 
   @override
@@ -528,6 +540,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
     builder: (context, constraints) {
       final stackedNavigation = MediaQuery.textScalerOf(context).scale(1) > 1.3;
       final mobile = widget.mobile;
+      widget.easyTier?.refreshVisible =
+          _showEasyTier && (_navigation == 3 ||
+              (_navigation == 1 && _filter == easyTierDeviceSource));
       final nav = _nav();
       return PopScope(
         canPop: _detail == null && _navigation == (widget.incomingOnly ? 2 : 0),
@@ -593,6 +608,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                       : switch (_navigation) {
                           1 => _deviceBrowser(),
                           2 => _local(),
+                          3 when _showEasyTier => EasyTierConsole(controller: widget.easyTier!),
                           _ => _home(),
                         },
                 ),
@@ -658,11 +674,13 @@ class _LanWorkspaceState extends State<LanWorkspace> {
       t('首页', 'Home'),
       t('设备列表', 'Devices'),
       t('本机', 'This device'),
+      if (_showEasyTier) t('组网', 'Network'),
     ];
     final icons = [
       Icons.home_outlined,
       Icons.devices_outlined,
       widget.mobile ? Icons.smartphone_outlined : Icons.computer_outlined,
+      if (_showEasyTier) Icons.hub_outlined,
     ];
     if (widget.mobile && !widget.incomingOnly) {
       return NavigationBarTheme(
@@ -697,7 +715,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
         ),
       );
     }
-    final items = List<Widget>.generate(3, (index) {
+    final items = List<Widget>.generate(labels.length, (index) {
       if (widget.incomingOnly && index != 2) return const SizedBox.shrink();
       final selected = index == _navigation;
       final child = Semantics(
@@ -786,6 +804,34 @@ class _LanWorkspaceState extends State<LanWorkspace> {
       return widget.mobile ? _mobileHome() : _desktopHome(box);
     },
   );
+
+  Widget _easyTierQuickStart(EasyTierController controller) {
+    final name = controller.profileName(controller.selectedId);
+    final running = controller.runningId.isNotEmpty &&
+        controller.runningId == controller.selectedId &&
+        !controller.runningConfigChanged;
+    return TextButton.icon(
+      onPressed: controller.busy || controller.startingOrStopping
+          ? null
+          : running
+          ? () => _navigate(3)
+          : () => startSelectedEasyTier(
+              context,
+              controller,
+              openConsole: () => _navigate(3),
+            ),
+      icon: Icon(running ? Icons.hub_outlined : Icons.play_arrow_rounded),
+      label: Text(
+        running
+            ? t('EasyTier 运行中 · $name', 'EasyTier running · $name')
+            : name.isEmpty
+            ? t('启动 EasyTier', 'Start EasyTier')
+            : t('启动 EasyTier · $name', 'Start EasyTier · $name'),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
 
   Widget _desktopHome(BoxConstraints box) {
     final device = _continueDevice;
@@ -896,6 +942,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                               compact: true,
                               expand: largeText,
                             ),
+                            if (_showEasyTier) _easyTierQuickStart(widget.easyTier!),
                           ],
                         ),
                       ),
@@ -1800,8 +1847,10 @@ class _LanWorkspaceState extends State<LanWorkspace> {
         favorites: widget.favorites,
         groups: widget.groups,
         groupFor: widget.groupFor,
-        source: _filter,
+        source: !_showEasyTier && _filter == easyTierDeviceSource ? 2 : _filter,
         onSource: (value) => setState(() => _filter = value),
+        easyTier: _showEasyTier ? widget.easyTier : null,
+        onFillEasyTierIp: _fillEasyTierIp,
         onAssignGroups: widget.onAssignGroups,
         captureUndo: widget.captureGroupUndo,
         onManageGroup: (action, id) => _manageGroup(action, groupId: id),
@@ -2646,9 +2695,14 @@ class _LanWorkspaceState extends State<LanWorkspace> {
     );
   }
 
-  Future<void> _addDevice() async {
+  void _fillEasyTierIp(String address) {
+    _navigate(0);
+    unawaited(_addDevice(initialAddress: address));
+  }
+
+  Future<void> _addDevice({String initialAddress = ''}) async {
     final form = GlobalKey<FormState>();
-    String address = '';
+    String address = initialAddress;
     final result = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
@@ -2670,6 +2724,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                 ),
                 const SizedBox(height: 20),
                 TextFormField(
+                  initialValue: initialAddress,
                   autofocus: true,
                   keyboardType: TextInputType.url,
                   textInputAction: TextInputAction.go,

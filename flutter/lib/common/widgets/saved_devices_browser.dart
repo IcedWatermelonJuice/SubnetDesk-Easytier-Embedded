@@ -17,11 +17,15 @@ class _SavedDevicesBrowser extends StatefulWidget {
     required this.onRefresh,
     required this.onConnect,
     required this.actions,
+    this.easyTier,
+    this.onFillEasyTierIp,
   });
   final List<WorkspaceDevice> nearby, recent, favorites;
   final List<FavoriteGroup> groups;
   final String? Function(String)? groupFor;
   final int source;
+  final EasyTierController? easyTier;
+  final ValueChanged<String>? onFillEasyTierIp;
   final ValueChanged<int> onSource;
   final void Function(Iterable<String>, String?)? onAssignGroups;
   final bool Function() Function()? captureUndo;
@@ -487,9 +491,69 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
     ],
   );
 
+  Widget _sourceChips() => Wrap(
+    key: const ValueKey('saved-device-sources'),
+    spacing: 12,
+    runSpacing: 6,
+    children: [
+      for (final entry in [
+        (0, t('附近设备', 'Nearby')),
+        (3, t('最近连接', 'Recent')),
+        (1, t('收藏', 'Favorites')),
+        (2, t('全部设备', 'All devices')),
+        if (widget.easyTier != null) (easyTierDeviceSource, 'EasyTier'),
+      ])
+        ChoiceChip(
+          label: Text(entry.$2),
+          showCheckmark: false,
+          selected: widget.source == entry.$1,
+          onSelected: (_) {
+            setState(resetSelection);
+            widget.onSource(entry.$1);
+          },
+        ),
+    ],
+  );
+
+  Widget _easyTierDevices(EasyTierController controller) => Align(
+    alignment: Alignment.topCenter,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 1040),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(32, 16, 32, 32),
+        children: [
+          _sourceChips(),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  t('EasyTier 节点', 'EasyTier nodes'),
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+              ),
+              IconButton(
+                tooltip: t('刷新节点', 'Refresh nodes'),
+                onPressed: controller.state != 'running' || controller.busy
+                    ? null
+                    : () => controller.command('refresh'),
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          const Divider(),
+          EasyTierNodeList(controller: controller, onFill: widget.onFillEasyTierIp),
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
+      if (widget.source == easyTierDeviceSource && widget.easyTier != null) {
+        return _easyTierDevices(widget.easyTier!);
+      }
       final showSidebar =
           box.maxWidth >= 850 &&
           MediaQuery.textScalerOf(context).scale(1) <= 1.3;
@@ -544,28 +608,7 @@ class _SavedDevicesBrowserState extends State<_SavedDevicesBrowser> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Wrap(
-                                  key: const ValueKey('saved-device-sources'),
-                                  spacing: 12,
-                                  runSpacing: 6,
-                                  children: [
-                                    for (final entry in [
-                                      (0, t('附近设备', 'Nearby')),
-                                      (3, t('最近连接', 'Recent')),
-                                      (1, t('收藏', 'Favorites')),
-                                      (2, t('全部设备', 'All devices')),
-                                    ])
-                                      ChoiceChip(
-                                        label: Text(entry.$2),
-                                        showCheckmark: false,
-                                        selected: widget.source == entry.$1,
-                                        onSelected: (_) {
-                                          setState(resetSelection);
-                                          widget.onSource(entry.$1);
-                                        },
-                                      ),
-                                  ],
-                                ),
+                                _sourceChips(),
                                 const SizedBox(height: 18),
                                 Row(
                                   children: [

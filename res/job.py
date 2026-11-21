@@ -198,13 +198,14 @@ SIGN_EXTENSIONS = [
 ]
 
 
-def sign_files(dir_path, only_ext=None):
+def sign_files(dir_path, only_ext=None, exclude_dirs=()):
     if only_ext:
         only_ext = only_ext.split(",")
         for i in range(len(only_ext)):
             if not only_ext[i].startswith("."):
                 only_ext[i] = "." + only_ext[i]
     for root, dirs, files in os.walk(dir_path):
+        dirs[:] = [name for name in dirs if name not in exclude_dirs]
         is_signed_dir = "usbmmidd_v2" in root
         for file in files:
             file_path = os.path.join(root, file)
@@ -241,6 +242,10 @@ def main():
     )
     sign_files_parser.add_argument(
         "only_ext", help="The file extension to sign.", default=None, nargs="?"
+    )
+
+    sign_files_parser.add_argument(
+        "--exclude-dir", action="append", default=[], help="Skip directories with this basename."
     )
 
     # Create a parser for the "fetch" command
@@ -300,7 +305,7 @@ def main():
     if args.command == "sign_one_file":
         sign_one_file(args.file_path)
     elif args.command == "sign_files":
-        sign_files(args.dir_path, args.only_ext)
+        sign_files(args.dir_path, args.only_ext, args.exclude_dir)
     elif args.command == "fetch":
         print(fetch())
     elif args.command == "update_status":

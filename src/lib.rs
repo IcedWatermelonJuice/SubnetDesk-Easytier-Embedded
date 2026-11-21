@@ -55,6 +55,8 @@ mod clipboard;
 pub mod core_main;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_runtime;
+#[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+mod easytier;
 mod lang;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod port_forward;

@@ -80,6 +80,8 @@ pub fn shutdown() {
         return;
     }
     crate::lan_server::LanServer::restart();
+    #[cfg(feature = "flutter")]
+    crate::easytier::shutdown();
     crate::server::input_service::fix_key_down_timeout_at_exit();
     #[cfg(windows)]
     crate::portable_service::client::drop_portable_service_shared_memory();

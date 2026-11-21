@@ -2937,30 +2937,54 @@ impl Connection {
         None
     }
 
-    // Try to fill user token for terminal connection.
-    // If username is empty, use the user token of the current session.
-    // If username is not empty, try to logon and check if the user is an administrator.
-    //    If the user is an administrator, use the user token of current process (SYSTEM).
-    //    If the user is not an administrator, return an error message.
-    // Note: Only local and domain users are supported, Microsoft account (online account) not supported for now.
     #[cfg(target_os = "windows")]
     fn fill_terminal_user_token(&mut self, username: &str, password: &str) -> Option<&'static str> {
-        // No need to check if the password is empty.
         if !username.is_empty() {
             return self.handle_administrator_check(username, password);
         }
 
-        if crate::platform::is_prelogin() {
-            self.terminal_user_token = None;
+        let Some(session_id) = crate::platform::get_current_process_session_id() else {
+            return Some("Failed to get current session id.");
+        };
+        let pid = std::process::id();
+        let is_system = match crate::platform::is_process_running_as_system(pid) {
+            Ok(is_system) => is_system,
+            Err(err) => {
+                log::warn!("无法确认普通终端宿主的账户：{err}");
+                return Some("Cannot verify the terminal host identity. Restart SubnetDesk in your Windows session.");
+            }
+        };
+
+        // 旧的跨进程令牌路径只适用于实际处在 Session 0 的系统服务。
+        let is_host = crate::desktop_runtime::is_host();
+        if !is_host && session_id == 0 && is_system && crate::platform::is_installed()
+        {
+            return self.handle_installed_user();
+        }
+        if !is_host || session_id == 0 || is_system {
+            return Some("Start SubnetDesk in a signed-in Windows user session to use the terminal.");
+        }
+        if !crate::platform::get_current_session_username()
+            .is_some_and(|username| {
+                let username = username.trim();
+                !username.is_empty() && !username.eq_ignore_ascii_case("SYSTEM")
+            })
+        {
             return Some("No active console user logged on, please connect and logon first.");
         }
 
-        if crate::platform::is_installed() {
-            return self.handle_installed_user();
+        // 终端子进程继承宿主令牌，只允许普通终端继承已确认未提升的令牌。
+        match crate::platform::is_elevated(Some(pid)) {
+            Ok(false) => {
+                self.terminal_user_token = Some(TerminalUserToken::SelfUser);
+                None
+            }
+            Ok(true) => Some("Restart SubnetDesk without administrator rights to use the terminal."),
+            Err(err) => {
+                log::warn!("无法确认普通终端宿主的令牌提升状态：{err}");
+                Some("Cannot verify terminal host privileges. Restart SubnetDesk without administrator rights.")
+            }
         }
-
-        self.terminal_user_token = Some(TerminalUserToken::SelfUser);
-        None
     }
 
     #[cfg(target_os = "windows")]
