@@ -110,3 +110,40 @@ pub fn delete(fingerprint: &str) -> ResultType<()> {
         Ok(())
     })
 }
+
+/// 本机 LAN 账户独立于远端设备身份，不占用任何 fingerprint 条目。
+pub(crate) fn load_local_server_credential() -> ResultType<Option<(String, zeroize::Zeroizing<String>)>> {
+    let encoded: Option<String> = with_store(|env, store| {
+        let value = env.call_method(store, "loadLocalServerCredential", "()Ljava/lang/String;", &[])?.l()?;
+        if value.is_null() { return Ok(None); }
+        let value = JString::from(value);
+        let text: String = env.get_string(&value)?.into();
+        Ok(Some(text))
+    })?;
+    let Some(encoded) = encoded else { return Ok(None); };
+    let encoded = zeroize::Zeroizing::new(encoded);
+    #[derive(serde::Deserialize)]
+    struct Credential { username: String, password: String }
+    let credential: Credential = serde_json::from_str(&encoded)?;
+    let password = zeroize::Zeroizing::new(credential.password);
+    hbb_common::lan::validate_username(&credential.username)?;
+    hbb_common::lan::validate_password(password.as_bytes())?;
+    Ok(Some((credential.username, password)))
+}
+
+pub(crate) fn save_local_server_credential(username: &str, password: &str) -> ResultType<()> {
+    with_store(|env, store| {
+        let username = env.new_string(username)?;
+        let password = env.new_string(password)?;
+        env.call_method(store, "saveLocalServerCredential", "(Ljava/lang/String;Ljava/lang/String;)V",
+            &[JValue::Object(&username), JValue::Object(&password)])?;
+        Ok(())
+    })
+}
+
+pub(crate) fn delete_local_server_credential() -> ResultType<()> {
+    with_store(|env, store| {
+        env.call_method(store, "deleteLocalServerCredential", "()V", &[])?;
+        Ok(())
+    })
+}

@@ -1,0 +1,30 @@
+[package]
+name = "subnetdesk-easytier-android"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+[lib]
+name = "subnetdesk_easytier_android"
+crate-type = ["cdylib"]
+
+# EasyTier 与桌面宿主使用不同工具链；不要将此包并入根 workspace。
+[workspace]
+
+[dependencies]
+anyhow = "1"
+easytier = { git = "https://github.com/EasyTier/EasyTier.git", rev = "8428a89d2dabc94c97d370ec607c6ca142473626", default-features = false, features = ["aes-gcm", "tun", "quic", "websocket", "smoltcp", "kcp", "magic-dns", "zstd"] }
+jni = "0.21.1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+toml_edit = "0.22"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+strip = "symbols"

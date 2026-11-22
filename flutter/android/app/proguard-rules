@@ -8,3 +8,5 @@
 
 # Rust holds this application-scoped object and calls its methods through JNI.
 -keep class com.carriez.flutter_hbb.LanCredentialStore { *; }
+-keep class com.carriez.flutter_hbb.EasyTierNative { *; }
+-keep class ffi.FFI { native <methods>; }

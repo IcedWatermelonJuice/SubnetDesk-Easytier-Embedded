@@ -334,13 +334,17 @@ pub fn source_allowed(ip: IpAddr) -> bool {
 }
 
 pub(crate) fn easytier_only() -> bool {
+    #[cfg(target_os = "android")]
+    if let Some(enabled) = crate::android_easytier::remote_only() { return enabled; }
     Config::get_option(base::config::keys::OPTION_LAN_EASYTIER_ONLY) == "Y"
 }
 
 pub(crate) fn easytier_source_allowed(ip: IpAddr) -> bool {
     #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
     { crate::easytier::source_allowed(ip) }
-    #[cfg(not(all(feature = "flutter", not(any(target_os = "android", target_os = "ios")))))]
+    #[cfg(target_os = "android")]
+    { crate::android_easytier::source_allowed(ip) }
+    #[cfg(not(any(target_os = "android", all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))))]
     { let _ = ip; false }
 }
 
