@@ -27,8 +27,9 @@ internal class EasyTierClient(context: Context) {
             if (message.what != EasyTierVpnService.RPC) return
             val request = pending.remove(message.arg1) ?: return
             sent.remove(message.arg1)
-            try { request.second(JSONObject(message.data.getString("response") ?: "{}"), null) }
-            catch (_: Exception) { request.second(null, "EasyTier 服务返回无效数据") }
+            val response = try { JSONObject(message.data.getString("response") ?: error("缺少响应")) }
+            catch (_: Exception) { request.second(null, "EasyTier 服务返回无效数据"); return }
+            request.second(response, null)
         }
     })
 

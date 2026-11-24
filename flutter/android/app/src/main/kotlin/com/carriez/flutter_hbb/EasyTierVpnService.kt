@@ -23,6 +23,7 @@ import android.system.OsConstants
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
@@ -54,19 +55,19 @@ class EasyTierVpnService : VpnService() {
     private var wantedProfile: JSONObject? = null
     private var hostname = ""
     private var runningHostname = ""
-    private var nativeStarted = false
-    private var nativeGeneration = 0
+    @Volatile private var nativeStarted = false
+    @Volatile private var nativeGeneration = 0
     private var lastNative = JSONObject()
     private var completedId = ""
     private var commandError = ""
     private var foreground = false
-    private var stopping = false
+    @Volatile private var stopping = false
     private var fatalStoreError = ""
 
     private val messenger by lazy { Messenger(object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(message: Message) {
             // 此服务有系统 BIND_VPN_SERVICE 权限，控制协议仍额外限制为应用 UID。
-            if (message.what != RPC || message.sendingUid != applicationInfo.uid) return
+            if (message.what != RPC || message.sendingUid != applicationInfo.uid || stopping) return
             val reply = message.replyTo ?: return
             val sequence = message.arg1
             val encoded = message.data.getString("request") ?: return
@@ -178,6 +179,7 @@ class EasyTierVpnService : VpnService() {
         }
         completedId = requestId
         publish(action == "stop")
+        if (action == "stop") releaseFailedCore()
         return snapshot(action == "stop")
     }
 
@@ -213,22 +215,30 @@ class EasyTierVpnService : VpnService() {
         if (physicalNetwork != null) startCore()
     }
 
+    private fun enqueueNetworkChange(change: () -> Unit) {
+        if (stopping) return
+        try { worker.execute { if (!stopping) change() } }
+        catch (error: RejectedExecutionException) {
+            if (!stopping) android.util.Log.w("EasyTierVpnService", "无法处理底层网络变化", error)
+        }
+    }
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) { worker.execute {
+        override fun onAvailable(network: Network) { enqueueNetworkChange {
             try {
-                if (stopping || !networkRequested) return@execute
-                if (network == physicalNetwork) return@execute
+                if (!networkRequested) return@enqueueNetworkChange
+                if (network == physicalNetwork) return@enqueueNetworkChange
                 state = "starting"; lastNative = JSONObject(); publish(false)
                 stopCore()
                 val bound = if (Build.VERSION.SDK_INT >= 23) connectivity.bindProcessToNetwork(network)
                     else @Suppress("DEPRECATION") ConnectivityManager.setProcessDefaultNetwork(network)
                 check(bound) { "无法绑定组网底层网络" }
                 physicalNetwork = network
-                if (Build.VERSION.SDK_INT >= 22) setUnderlyingNetworks(arrayOf(network))
+                // stopCore 已关闭旧 TUN；新 TUN 的底层网络交给 Builder 设置。
                 if (wantedProfile != null) { state = "starting"; startCore() }
             } catch (error: Exception) { fail(error.message ?: "底层网络切换失败") }
         } }
-        override fun onLost(network: Network) { worker.execute {
+        override fun onLost(network: Network) { enqueueNetworkChange {
             if (physicalNetwork == network) {
                 physicalNetwork = null
                 state = "starting"; lastNative = JSONObject(); publish(false)
@@ -236,11 +246,11 @@ class EasyTierVpnService : VpnService() {
                     stopCore()
                     state = if (wantedProfile != null) "starting" else "stopped"
                     runtimeError = if (wantedProfile != null) "等待可用的底层网络" else ""
-                } catch (error: Exception) { state = "failed"; runtimeError = error.message ?: "底层网络丢失，核心停止失败" }
+                } catch (error: Exception) { fail(error.message ?: "底层网络丢失，核心停止失败") }
                 finally { publish(false) }
             }
         } }
-        override fun onUnavailable() { worker.execute { fail("没有可用的底层网络") } }
+        override fun onUnavailable() { enqueueNetworkChange { if (networkRequested) fail("没有可用的底层网络") } }
     }
 
     private fun startCore() {
@@ -265,7 +275,7 @@ class EasyTierVpnService : VpnService() {
         if (address.isNotEmpty()) {
             configureTunnel(status, address)
             state = if (tunnel != null && status.optBoolean("tun_ready")) "running" else "starting"
-        }
+        } else state = "starting"
     }
 
     private fun ipv4(cidr: String, allowDefault: Boolean): Pair<String, Int> {
@@ -283,12 +293,14 @@ class EasyTierVpnService : VpnService() {
         val routes = status.optJSONArray("tun_routes") ?: JSONArray()
         val allowDefault = status.optBoolean("allow_default_route")
         val normalized = (0 until routes.length()).map { routes.getString(it) }.distinct().sorted()
-        val key = address + ":" + normalized.joinToString(",")
-        if (tunnel != null && key == tunnelKey) return
         val mtu = status.optInt("mtu", 1380)
         require(mtu in 576..9000) { "EasyTier MTU 超出 Android 支持范围" }
+        val network = physicalNetwork ?: error("组网底层网络已断开")
+        val key = "$address:$mtu:$allowDefault:$network:" + normalized.joinToString(",")
+        if (tunnel != null && key == tunnelKey) return
         val builder = Builder().setSession("SubnetDesk EasyTier").setMtu(mtu)
             .addAddress(local.first, local.second).allowFamily(OsConstants.AF_INET6)
+        if (Build.VERSION.SDK_INT >= 22) builder.setUnderlyingNetworks(arrayOf(network))
         for (route in normalized) {
             if (route == "0.0.0.0/0" && !allowDefault) continue
             val parsed = ipv4(route, allowDefault)
@@ -296,7 +308,10 @@ class EasyTierVpnService : VpnService() {
         }
         // 不添加默认 DNS；未配置的互联网和 IPv6 流量保持系统原有路径。
         val next = builder.establish() ?: error("无法建立 VPN 虚拟网卡，系统授权可能已撤销")
-        try { callNative { EasyTierNative.setTunFd(next.fd) } }
+        try {
+            if (Build.VERSION.SDK_INT >= 22) check(setUnderlyingNetworks(arrayOf(network))) { "无法设置 VPN 底层网络" }
+            callNative { EasyTierNative.setTunFd(next.fd) }
+        }
         catch (error: Throwable) { next.close(); throw error }
         val previous = tunnel
         tunnel = next; tunnelKey = key
@@ -323,21 +338,31 @@ class EasyTierVpnService : VpnService() {
         if (intentional && ::store.isInitialized) store.remoteOnly = false
         var problem: Exception? = null
         try { stopCore() } catch (error: Exception) { problem = error } finally {
-            state = if (problem == null) "stopped" else "failed"
-            runtimeError = problem?.message ?: ""
-            if (networkRequested) { connectivity.unregisterNetworkCallback(networkCallback); networkRequested = false }
+            if (networkRequested) {
+                networkRequested = false
+                try { connectivity.unregisterNetworkCallback(networkCallback) }
+                catch (error: Exception) { if (problem == null) problem = error }
+            }
             physicalNetwork = null
             if (!nativeStarted) {
-                if (Build.VERSION.SDK_INT >= 23) connectivity.bindProcessToNetwork(null)
-                else @Suppress("DEPRECATION") ConnectivityManager.setProcessDefaultNetwork(null)
+                try {
+                    val unbound = if (Build.VERSION.SDK_INT >= 23) connectivity.bindProcessToNetwork(null)
+                        else @Suppress("DEPRECATION") ConnectivityManager.setProcessDefaultNetwork(null)
+                    check(unbound) { "无法释放组网底层网络绑定" }
+                } catch (error: Exception) { if (problem == null) problem = error }
             }
-            if (foreground) { @Suppress("DEPRECATION") stopForeground(true); foreground = false }
+            try { clearForeground() }
+            catch (error: Exception) { if (problem == null) problem = error }
+            state = if (problem == null) "stopped" else "failed"
+            runtimeError = problem?.message ?: ""
         }
         problem?.let { throw it }
     }
 
     private fun fail(message: String) {
-        try { stopCore() } catch (_: Exception) { tunnel?.close(); tunnel = null }
+        // 失败后取消待启动方案和网络请求，避免迟到的网络回调再次启动核心。
+        try { stopNetwork(false) }
+        catch (error: Exception) { android.util.Log.w("EasyTierVpnService", "组网故障后的清理未完成", error) }
         state = "failed"; runtimeError = message
         publish(false)
         releaseFailedCore()
@@ -358,7 +383,8 @@ class EasyTierVpnService : VpnService() {
     private fun snapshot(intentional: Boolean): JSONObject {
         val result = JSONObject(lastNative.toString())
         result.put("available", EasyTierNative.available && fatalStoreError.isEmpty())
-            .put("state", state).put("remote_only", ::store.isInitialized && store.remoteOnly)
+            // 存储损坏时无法确认用户先前的安全选择，不能广播 false 放开来源。
+            .put("state", state).put("remote_only", !::store.isInitialized || store.remoteOnly)
             .put("profiles", if (::store.isInitialized) store.summaries() else JSONArray())
             .put("selected_id", if (::store.isInitialized) store.selected else "")
             .put("running_id", runningId).put("completed_request_id", completedId)
@@ -379,7 +405,13 @@ class EasyTierVpnService : VpnService() {
         sendBroadcast(Intent(ACTION_STATE).setPackage(packageName).putExtra("snapshot", snapshot(intentional).toString()), INTERNAL_PERMISSION)
     }
 
-    private fun ensureForeground() {
+    @Synchronized private fun clearForeground() {
+        if (!foreground) return
+        @Suppress("DEPRECATION") stopForeground(true)
+        foreground = false
+    }
+
+    @Synchronized private fun ensureForeground() {
         if (foreground) return
         check(prepare(this) == null) { "VPN 系统授权尚未获得" }
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -405,9 +437,13 @@ class EasyTierVpnService : VpnService() {
         stopping = true
         poll?.cancel(false)
         worker.execute {
+            val failure = if (state == "failed") runtimeError else null
             try { stopNetwork(false) }
             catch (error: Exception) { state = "failed"; runtimeError = error.message ?: "核心停止失败" }
-            finally { publish(false); worker.shutdown(); releaseFailedCore() }
+            finally {
+                if (failure != null) { state = "failed"; runtimeError = failure }
+                publish(false); worker.shutdown(); releaseFailedCore()
+            }
         }
         super.onDestroy()
     }

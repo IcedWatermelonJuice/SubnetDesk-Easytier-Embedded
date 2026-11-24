@@ -1,4 +1,4 @@
-# Android 分支交接（2026-11-22）
+# Android 分支交接（更新于 2026-11-24）
 
 ## 当前状态与用户约束
 
@@ -60,7 +60,7 @@
 ## 收尾时已知待复核项
 
 1. **没有 Android 类型检查、链接或实际运行验证**。先核对 Kotlin/JNI/Rust 真实签名，再在 SDK 到位后编译，不能把源码解析结果当作功能通过。
-2. `EasyTierVpnService.configureTunnel()` 当前没有在 Builder 上设置底层网络；`onAvailable()` 中的 `setUnderlyingNetworks()` 可能发生在 VPN 尚未建立时而失败。后续应在 API 22+ 对 Builder 设置当前底层网络，并核对返回值和切网行为。
+2. 底层网络设置时序已于 11 月 24 日修复：API 22+ 在 Builder 上设置物理网络，建立后核对 `setUnderlyingNetworks()` 返回值；切网行为仍需真机验证。
 3. `releaseFailedCore()` 已包含仅 `:easytier` 进程可执行的延迟自终止兜底。需重点检查停止超时、回复送达、generation 判定、onDestroy/onRevoke 重入，绝不能终止主应用。
 4. 核对主进程状态广播与 `remote_only` 持久化：主动停止可以关限制，撤销／崩溃／超时必须保留拒绝策略；无效快照不能长期延长旧白名单。
 5. 核对 SAF 授权取消、Activity 重建、组件缺失、超时等结果均能到达 Flutter；不得将进入 starting 当作 TUN 已就绪。
@@ -79,3 +79,18 @@
 先读本文件及 [Android 实现说明](android-support.md)、[原生库说明](../../../libs/easytier_android/README.md)。优先处理上述待复核项，不扩大到桌面重构。
 
 用户允许并具备 SDK/NDK 后，再按原 SDK 标准生成与原 RustDesk 库 ABI 一致的 EasyTier `.so`，随后进行 APK 编译和最小真机验证。当前源版本保留 RC8，不擅自发布 Android RC、安装工具链、合并主分支或推送。
+
+## 2026-11-24 续接修复
+
+用户恢复额度后继续代码完善，仍遵守暂不编译的要求。本次只修改 Android Kotlin 控制链路与本交接文档：
+
+- 按 [VpnService API](https://developer.android.com/reference/android/net/VpnService#setUnderlyingNetworks(android.net.Network[])) 与 [Builder API](https://developer.android.com/reference/android/net/VpnService.Builder#setUnderlyingNetworks(android.net.Network[])) 修正底层网络设置时机；TUN 缓存键包含 MTU、底层网络和默认路由许可，配置变化后重新建立。
+- 核心暂时失去虚拟地址时退回 `starting`，不保留旧的 `running` 与节点来源授权。
+- 故障清理取消待启动方案、网络请求及前台通知，防止迟到的网络回调自行启动；服务销毁后的网络回调不再提交到已经关闭的执行器。
+- 释放网络回调、进程网络绑定或前台通知失败时继续清理其他资源并反馈失败；显式停止失败也进入仅独立进程的兜底释放路径。跨线程检查核心代次的字段使用 `@Volatile`，前台通知启动与清理使用同一对象锁。
+- 保留撤销授权或核心失败的错误状态，不被后续 `onDestroy()` 覆盖成普通停止。
+- 方案文件读取失败时发布限制开启状态，避免因存储未初始化而误关闭仅 EasyTier 模式。
+- Flutter MethodChannel 结果增加一次完成保护；Activity 退出时统一结束尚未完成的请求，导出内容回调不再在已关闭页面启动文件选择器。
+- Messenger 将响应解析与业务回调分开，避免业务回调异常触发同一请求的第二次结果回调。
+
+检查范围为代码逐项复核与 `git diff --check`，并对照基础提交确认 `build.gradle` 完全未改。未运行 Kotlin 类型检查、编译或真机测试，不据此宣称 Android 功能已经验收通过。独立 Cargo.lock、实际 JNI 链接、切网及后台生命周期仍按上方清单留待具备 SDK 后验证。

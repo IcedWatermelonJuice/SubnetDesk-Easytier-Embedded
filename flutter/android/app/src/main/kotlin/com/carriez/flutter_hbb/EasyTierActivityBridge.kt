@@ -26,9 +26,29 @@ internal class EasyTierActivityBridge(private val activity: Activity, messenger:
     private var pendingRequest: JSONObject? = null
     private var exportToml: String? = null
     private var closed = false
+    private val activeResults = HashSet<OnceResult>()
+
+    /** Activity 退出与异步文档回调可能交错，每次 Flutter 调用只能完成一次。 */
+    private class OnceResult(
+        private val target: MethodChannel.Result,
+        private val finished: (OnceResult) -> Unit
+    ) : MethodChannel.Result {
+        private var done = false
+        private fun finish(reply: () -> Unit) {
+            if (done) return
+            done = true
+            finished(this)
+            reply()
+        }
+        override fun success(result: Any?) = finish { target.success(result) }
+        override fun error(code: String, message: String?, details: Any?) = finish { target.error(code, message, details) }
+        override fun notImplemented() = finish { target.notImplemented() }
+    }
 
     init {
-        channel.setMethodCallHandler { call, result ->
+        channel.setMethodCallHandler { call, originalResult ->
+            val result = OnceResult(originalResult) { activeResults.remove(it) }
+            activeResults.add(result)
             try {
                 when (call.method) {
                     "status" -> rpc(JSONObject().put("action", "status"), result)
@@ -60,6 +80,7 @@ internal class EasyTierActivityBridge(private val activity: Activity, messenger:
                         val request = JSONObject().put("action", "external_complete").put("request_id", call.argument<String>("request_id"))
                         begin(result, request)
                         client.request(JSONObject().put("action", "export_content").put("id", call.argument<String>("id"))) { response, error ->
+                            if (closed || pending !== result) return@request
                             if (error != null || response?.optBoolean("ok") != true) { failPending(error ?: response?.optString("error") ?: "无法导出方案"); return@request }
                             try {
                                 val profile = response.getJSONObject("profile")
@@ -173,6 +194,7 @@ internal class EasyTierActivityBridge(private val activity: Activity, messenger:
 
     fun close() {
         failPending("页面已关闭，请重新执行操作")
+        activeResults.toList().forEach { it.error("easytier_closed", "页面已关闭，请重新执行操作", null) }
         closed = true
         channel.setMethodCallHandler(null)
         client.close(); io.shutdown()
