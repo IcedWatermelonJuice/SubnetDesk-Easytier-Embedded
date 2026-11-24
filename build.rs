@@ -80,11 +80,16 @@ fn install_android_deps() {
 fn main() {
     hbb_common::gen_version();
     install_android_deps();
-    #[cfg(all(windows, feature = "inline"))]
-    build_manifest();
-    #[cfg(windows)]
-    build_windows();
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    // build.rs 的 cfg 描述宿主；交叉编译时按实际目标决定是否编译 Windows 实现。
+    #[cfg(all(windows, feature = "inline"))]
+    if target_os == "windows" {
+        build_manifest();
+    }
+    #[cfg(windows)]
+    if target_os == "windows" {
+        build_windows();
+    }
     if target_os == "macos" {
         #[cfg(target_os = "macos")]
         build_mac();

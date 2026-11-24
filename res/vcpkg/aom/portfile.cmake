@@ -41,6 +41,11 @@ if(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm" AND VCPKG_TARGET_IS_LINUX)
   set(aom_target_cpu "-DENABLE_NEON=OFF")
 endif()
 
+# Windows 上的 NDK 不提供独立 as，使用 clang 的集成汇编器。
+if(VCPKG_TARGET_IS_ANDROID AND CMAKE_HOST_WIN32)
+    list(APPEND aom_target_cpu
+        "-DCMAKE_ASM_COMPILER=$ENV{ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe")
+endif()
 vcpkg_cmake_configure(
     SOURCE_PATH ${SOURCE_PATH}
     OPTIONS
