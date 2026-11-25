@@ -15,6 +15,7 @@ struct Patch {
     secret: Option<String>,
     peers: Option<Vec<String>>,
     dhcp: Option<bool>,
+    latency_first: Option<bool>,
     ipv4: Option<String>,
 }
 
@@ -33,6 +34,8 @@ private_mode = true
 enable_udp_broadcast_relay = false
 enable_quic_proxy = false
 disable_quic_input = true
+enable_kcp_proxy = false
+disable_kcp_input = true
 accept_dns = false
 disable_upnp = true
 bind_device = false
@@ -109,12 +112,15 @@ pub(crate) fn edit(toml: &str, patch: &str) -> Result<Value> {
             doc["ipv4"] = value(format!("{ip}/{prefix}"));
         }
     }
+    super::profile_flags::normalize(&mut doc, patch.latency_first)?;
     let output = doc.to_string();
     validate(&output)?;
     let identity = doc.get("network_identity").and_then(Item::as_table_like);
     let field = |key| identity.and_then(|t| t.get(key)).and_then(Item::as_str).unwrap_or_default();
     Ok(json!({"ok":true,"toml":output,"fields":{
         "network_name":field("network_name"),"secret":field("network_secret"),"peers":peers(&doc),
+        "latency_first":doc.get("flags").and_then(Item::as_table_like)
+            .and_then(|flags| flags.get("latency_first")).and_then(Item::as_bool).unwrap_or(false),
         "dhcp":doc.get("dhcp").and_then(Item::as_bool).unwrap_or(false),
         "ipv4":doc.get("ipv4").and_then(Item::as_str).unwrap_or_default()
     }}))

@@ -24,6 +24,7 @@ import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
 import '../widgets/custom_scale_widget.dart';
+import '../widgets/view_rotation_button.dart';
 
 final initText = '1' * 1024;
 
@@ -553,91 +554,121 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
         mainAxisSize: MainAxisSize.max,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          Row(
-              children: <Widget>[
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.clear),
-                      onPressed: () {
-                        clientClose(sessionId, gFFI);
-                      },
-                    ),
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.tv),
-                      onPressed: () {
-                        setState(() => _showEdit = false);
-                        showOptions(context, widget.id, gFFI.dialogManager);
-                      },
-                    )
-                  ] +
-                  (isWebDesktop || ffiModel.viewOnly || !ffiModel.keyboard
-                      ? []
-                      : gFFI.ffiModel.isPeerAndroid
-                          ? [
-                              IconButton(
-                                  color: Colors.white,
-                                  icon: Icon(Icons.keyboard),
-                                  onPressed: openKeyboard),
-                              IconButton(
-                                color: Colors.white,
-                                icon: const Icon(Icons.build),
-                                onPressed: () => gFFI.dialogManager
-                                    .toggleMobileActionsOverlay(ffi: gFFI),
-                              )
-                            ]
-                          : [
-                              IconButton(
-                                  color: Colors.white,
-                                  icon: Icon(Icons.keyboard),
-                                  onPressed: openKeyboard),
-                              IconButton(
-                                color: Colors.white,
-                                icon: Icon(gFFI.ffiModel.touchMode
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children:
+                    <Widget>[
+                      IconButton(
+                        color: Colors.white,
+                        icon: Icon(Icons.clear),
+                        onPressed: () {
+                          clientClose(sessionId, gFFI);
+                        },
+                      ),
+                      IconButton(
+                        color: Colors.white,
+                        icon: Icon(Icons.tv),
+                        onPressed: () {
+                          setState(() => _showEdit = false);
+                          showOptions(context, widget.id, gFFI.dialogManager);
+                        },
+                      ),
+                      Obx(
+                        () => MobileViewRotationButton(
+                          angle: ffiModel.clientRotation.value,
+                          enabled:
+                              gFFI.connType == ConnType.defaultConn &&
+                              ffiModel.clientRotationSupported,
+                          tooltip: translate('Rotation'),
+                          onSelected: ffiModel.setClientRotation,
+                        ),
+                      ),
+                    ] +
+                    (isWebDesktop || ffiModel.viewOnly || !ffiModel.keyboard
+                        ? []
+                        : gFFI.ffiModel.isPeerAndroid
+                        ? [
+                            IconButton(
+                              color: Colors.white,
+                              icon: Icon(Icons.keyboard),
+                              onPressed: openKeyboard,
+                            ),
+                            IconButton(
+                              color: Colors.white,
+                              icon: const Icon(Icons.build),
+                              onPressed: () => gFFI.dialogManager
+                                  .toggleMobileActionsOverlay(ffi: gFFI),
+                            ),
+                          ]
+                        : [
+                            IconButton(
+                              color: Colors.white,
+                              icon: Icon(Icons.keyboard),
+                              onPressed: openKeyboard,
+                            ),
+                            IconButton(
+                              color: Colors.white,
+                              icon: Icon(
+                                gFFI.ffiModel.touchMode
                                     ? Icons.touch_app
-                                    : Icons.mouse),
-                                onPressed: () => setState(
-                                    () => _showGestureHelp = !_showGestureHelp),
+                                    : Icons.mouse,
                               ),
-                            ]) +
-                  (isWeb
-                      ? []
-                      : <Widget>[
-                          futureBuilder(
+                              onPressed: () => setState(
+                                () => _showGestureHelp = !_showGestureHelp,
+                              ),
+                            ),
+                          ]) +
+                    (isWeb
+                        ? []
+                        : <Widget>[
+                            futureBuilder(
                               future: gFFI.invokeMethod(
-                                  "get_value", "KEY_IS_SUPPORT_VOICE_CALL"),
+                                "get_value",
+                                "KEY_IS_SUPPORT_VOICE_CALL",
+                              ),
                               hasData: (isSupportVoiceCall) => IconButton(
-                                    color: Colors.white,
-                                    icon: isAndroid && isSupportVoiceCall
-                                        ? SvgPicture.asset('assets/chat.svg',
-                                            colorFilter: ColorFilter.mode(
-                                                Colors.white, BlendMode.srcIn))
-                                        : Icon(Icons.message),
-                                    onPressed: () =>
-                                        isAndroid && isSupportVoiceCall
-                                            ? showChatOptions(widget.id)
-                                            : onPressedTextChat(widget.id),
-                                  ))
-                        ]) +
-                  [
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.more_vert),
-                      onPressed: () {
-                        setState(() => _showEdit = false);
-                        showActions(widget.id);
-                      },
-                    ),
-                  ]),
-          Obx(() => IconButton(
-                color: Colors.white,
-                icon: Icon(Icons.expand_more),
-                onPressed: gFFI.ffiModel.waitForFirstImage.isTrue
-                    ? null
-                    : () {
-                        setState(() => _showBar = !_showBar);
-                      },
-              )),
+                                color: Colors.white,
+                                icon: isAndroid && isSupportVoiceCall
+                                    ? SvgPicture.asset(
+                                        'assets/chat.svg',
+                                        colorFilter: ColorFilter.mode(
+                                          Colors.white,
+                                          BlendMode.srcIn,
+                                        ),
+                                      )
+                                    : Icon(Icons.message),
+                                onPressed: () => isAndroid && isSupportVoiceCall
+                                    ? showChatOptions(widget.id)
+                                    : onPressedTextChat(widget.id),
+                              ),
+                            ),
+                          ]) +
+                    [
+                      IconButton(
+                        color: Colors.white,
+                        icon: Icon(Icons.more_vert),
+                        onPressed: () {
+                          setState(() => _showEdit = false);
+                          showActions(widget.id);
+                        },
+                      ),
+                    ],
+              ),
+            ),
+          ),
+          Obx(
+            () => IconButton(
+              color: Colors.white,
+              icon: Icon(Icons.expand_more),
+              onPressed: gFFI.ffiModel.waitForFirstImage.isTrue
+                  ? null
+                  : () {
+                      setState(() => _showBar = !_showBar);
+                    },
+            ),
+          ),
         ],
       ),
     );
@@ -1148,9 +1179,21 @@ class ImagePaint extends StatelessWidget {
       }
     }
     final adjust = c.getAdjustY();
+    final rotation = ffiModel.clientRotationValue;
+    final image = m.image;
     return CustomPaint(
       painter: ImagePainter(
-          image: m.image, x: c.x / s, y: (c.y + adjust) / s, scale: s),
+        image: image,
+        x: c.x / s,
+        y: (c.y + adjust) / s,
+        scale: s,
+        quarterTurns: rotation.quarterTurns,
+        virtualSize: image == null
+            ? null
+            : rotation.rotatedSize(
+                Size(image.width.toDouble(), image.height.toDouble()),
+              ),
+      ),
     );
   }
 }
@@ -1196,12 +1239,28 @@ class CursorPaint extends StatelessWidget {
     }
     final s2 = s < mins ? mins : s;
     final adjust = c.getAdjustY();
+    final rotation = ffiModel.clientRotationValue;
+    final rotated = rotation.quarterTurns != 0;
+    final hotspot = rotation.rotateHotspot(
+      image.width.toDouble(),
+      image.height.toDouble(),
+      Offset(hotx, hoty),
+    );
     return CustomPaint(
       painter: ImagePainter(
-          image: image,
-          x: (m.x - hotx) * factor + c.x / s2,
-          y: (m.y - hoty) * factor + (c.y + adjust) / s2,
-          scale: s2),
+        image: image,
+        x:
+            (rotated ? m.x * factor - hotspot.dx : (m.x - hotx) * factor) +
+            c.x / s2,
+        y:
+            (rotated ? m.y * factor - hotspot.dy : (m.y - hoty) * factor) +
+            (c.y + adjust) / s2,
+        scale: s2,
+        quarterTurns: rotation.quarterTurns,
+        virtualSize: rotation.rotatedSize(
+          Size(image.width.toDouble(), image.height.toDouble()),
+        ),
+      ),
     );
   }
 }

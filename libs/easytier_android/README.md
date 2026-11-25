@@ -43,10 +43,13 @@ OwnedFd。固定上游 mobile TUN 设置 `close_fd_on_drop(false)`，故桥接�
 
 只把虚拟网段、节点和已发布代理子网放入 tun_routes。只有当前方案显式配置出口节点，且该
 出口的有效核心路由确实发布 `0.0.0.0/0` 时，才允许默认路由。普通方案不自动接管全网。
-不设置第三方公共 DNS；`accept_dns` 目前明确拒绝。系统转发、no_tun 和物理广播捕获也
-明确拒绝，不静默承诺 Android 无法实现的能力。传输 IPv6 沿用核心支持；本桥接状态和 TUN
+不设置第三方公共 DNS；`accept_dns` 目前明确拒绝。Android 在保存和启动方案时强制将
+`proxy_forward_by_system`、`no_tun`、`enable_udp_broadcast_relay` 设为 `false`，兼容桌面导入方案。传输 IPv6 沿用核心支持；本桥接状态和 TUN
 路由输出以当前 SubnetDesk 的 IPv4 组网模型为准，未接管 IPv6 由 Kotlin 保留系统处理。
 
+## RC9 方案选项
+
+方案编辑支持 `latency_first` 开关。保存及启动时另强制 `disable_quic_input = true`、`disable_kcp_input = true`、`enable_quic_proxy = false`、`enable_kcp_proxy = false`，避免 TCP 加速代理重建本地连接后丢失原始来源，影响“仅允许 EasyTier 远控”的 IP 校验；普通 QUIC 隧道仍可使用。该覆盖不以来源限制开关状态为条件。
 ## 以后具备 SDK/NDK 时
 
 1. 保留原项目 `flutter.minSdkVersion`、`flutter.targetSdkVersion`、compile SDK 表达式，

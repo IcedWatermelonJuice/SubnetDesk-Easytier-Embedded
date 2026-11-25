@@ -1244,6 +1244,10 @@ class InputModel {
     if (isViewCamera) return;
     // Only send relative mouse events when relative mode is enabled and supported.
     if (!isRelativeMouseModeSupported || !relativeMouseMode.value) return;
+    // 手机虚拟鼠标与桌面相对鼠标使用同一旋转坐标映射。
+    final rotated = _rotateDeltaToBase(Offset(dx, dy));
+    dx = rotated.dx;
+    dy = rotated.dy;
     _mobileDeltaRemainderX += dx;
     _mobileDeltaRemainderY += dy;
     final x = _mobileDeltaRemainderX.truncate();

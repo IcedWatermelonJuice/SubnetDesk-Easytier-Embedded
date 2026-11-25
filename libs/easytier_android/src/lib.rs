@@ -2,6 +2,7 @@
 #![cfg(target_os = "android")]
 
 mod profile;
+mod profile_flags;
 // 复用经过 RC8 验收的展示关联算法。它只接收数据，不参与 TUN 或来源授权。
 #[path = "../../../src/easytier/network_view.rs"]
 mod network_view;
@@ -131,9 +132,15 @@ impl Worker {
         let cfg = TomlConfigLoader::new_from_str(config).map_err(|_| anyhow!("EasyTier TOML 无效"))?;
         let mut flags = cfg.get_flags();
         if flags.accept_dns { bail!("Android 当前不接管系统 DNS，请关闭 accept_dns 后启动"); }
-        if flags.proxy_forward_by_system || flags.no_tun || flags.enable_udp_broadcast_relay {
-            bail!("Android 方案不支持系统转发、no_tun 或物理网卡 UDP 广播捕获");
-        }
+        // 兼容桌面导入及旧存储方案；Android 始终接入 VpnService 提供的 TUN。
+        flags.proxy_forward_by_system = false;
+        flags.no_tun = false;
+        flags.enable_udp_broadcast_relay = false;
+        // 保留 TUN 入站的原始节点来源；普通 QUIC 隧道仍可使用。
+        flags.disable_quic_input = true;
+        flags.disable_kcp_input = true;
+        flags.enable_quic_proxy = false;
+        flags.enable_kcp_proxy = false;
         if !(576..=9000).contains(&flags.mtu) { bail!("TUN MTU 必须在 576 至 9000 之间"); }
         // 网络绑定由 VpnService 所在独立进程处理，不要求 SO_BINDTODEVICE 权限。
         flags.bind_device = false;

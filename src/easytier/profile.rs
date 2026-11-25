@@ -35,6 +35,7 @@ pub(super) struct Patch {
     secret: Option<String>,
     peers: Option<Vec<String>>,
     dhcp: Option<bool>,
+    latency_first: Option<bool>,
     ipv4: Option<String>,
 }
 
@@ -44,6 +45,7 @@ pub(super) struct Fields {
     secret: String,
     peers: Vec<String>,
     dhcp: bool,
+    latency_first: bool,
     ipv4: String,
 }
 
@@ -250,6 +252,8 @@ private_mode = true
 enable_udp_broadcast_relay = false
 enable_quic_proxy = false
 disable_quic_input = true
+enable_kcp_proxy = false
+disable_kcp_input = true
 accept_dns = false
 disable_upnp = true
 "#,
@@ -290,6 +294,8 @@ pub(super) fn fields(toml: &str) -> Fields {
         secret: string("network_secret"),
         peers: peer_uris(doc.as_table().get("peer")),
         dhcp: doc.as_table().get("dhcp").and_then(Item::as_bool).unwrap_or_default(),
+        latency_first: doc.as_table().get("flags").and_then(Item::as_table_like)
+            .and_then(|flags| flags.get("latency_first")).and_then(Item::as_bool).unwrap_or_default(),
         ipv4: doc.as_table().get("ipv4").and_then(Item::as_str).unwrap_or_default().to_owned(),
     }
 }
@@ -334,9 +340,8 @@ fn patch_peers(doc: &mut Document, peers: Vec<String>) {
 
 pub(super) fn patch(toml: &str, update: Option<Patch>) -> Result<String> {
     let mut doc = parse(toml)?;
-    let Some(update) = update else {
-        return Ok(toml.to_owned());
-    };
+    let update = update.unwrap_or_default();
+    normalize_flags(&mut doc, update.latency_first)?;
     if update.network_name.is_some() || update.secret.is_some() {
         if doc.as_table().get("network_identity").is_none() {
             doc.as_table_mut().insert("network_identity", Item::Table(Table::new()));
@@ -382,9 +387,68 @@ pub(super) fn patch(toml: &str, update: Option<Patch>) -> Result<String> {
 
 pub(super) fn launch_toml(toml: &str, instance_id: Uuid, hostname: &str) -> Result<String> {
     let mut doc = parse(toml)?;
+    normalize_flags(&mut doc, None)?;
     // 运行用 ID 与方案 ID 解耦，防止把同端口上的其他实例误认成当前实例。
     doc.as_table_mut().insert("instance_id", value(instance_id.to_string()));
     // 节点统一使用「本机」显示名称，方案文件中的 hostname 不覆盖应用名称。
     doc.as_table_mut().insert("hostname", value(hostname));
     Ok(doc.to_string())
+}
+
+fn normalize_flags(doc: &mut Document, latency_first: Option<bool>) -> Result<()> {
+    if doc.as_table().get("flags").is_none() {
+        doc.as_table_mut().insert("flags", Item::Table(Table::new()));
+    }
+    let flags = doc.as_table_mut().get_mut("flags").and_then(Item::as_table_like_mut)
+        .ok_or("EasyTier 的 flags 必须是表。")?;
+    // TCP 加速代理会重建本地连接，导致远控入口无法校验原始节点 IP。
+    for (key, enabled) in [
+        ("disable_quic_input", true), ("disable_kcp_input", true),
+        ("enable_quic_proxy", false), ("enable_kcp_proxy", false),
+    ] {
+        flags.insert(key, value(enabled));
+    }
+    if let Some(enabled) = latency_first {
+        flags.insert("latency_first", value(enabled));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proxy_overrides_preserve_latency_and_other_fields() {
+        for source in [
+            "[flags]\nenable_quic_proxy = true\nenable_kcp_proxy = true\ndisable_quic_input = false\ndisable_kcp_input = false\nlatency_first = true\nmtu = 1380\n",
+            "flags = { enable_quic_proxy = true, enable_kcp_proxy = true, disable_quic_input = false, disable_kcp_input = false, latency_first = true, mtu = 1380 }\n",
+        ] {
+            let patched = patch(source, None).unwrap();
+            let doc = parse(&patched).unwrap();
+            assert_eq!(doc["flags"]["disable_quic_input"].as_bool(), Some(true));
+            assert_eq!(doc["flags"]["disable_kcp_input"].as_bool(), Some(true));
+            assert_eq!(doc["flags"]["enable_quic_proxy"].as_bool(), Some(false));
+            assert_eq!(doc["flags"]["enable_kcp_proxy"].as_bool(), Some(false));
+            assert!(fields(&patched).latency_first);
+            assert_eq!(doc["flags"]["mtu"].as_integer(), Some(1380));
+            assert_eq!(patch(&patched, None).unwrap(), patched);
+        }
+    }
+
+    #[test]
+    fn latency_switch_round_trips_and_old_profiles_are_normalized_at_launch() {
+        for enabled in [false, true] {
+            let patch_fields: Patch = serde_json::from_value(serde_json::json!({"latency_first": enabled})).unwrap();
+            let patched = patch("dhcp = true\n", Some(patch_fields)).unwrap();
+            assert_eq!(fields(&patched).latency_first, enabled);
+            let launched = launch_toml(&patched, Uuid::new_v4(), "test").unwrap();
+            assert_eq!(fields(&launched).latency_first, enabled);
+        }
+        let launched = launch_toml("[flags]\nenable_quic_proxy = true\n", Uuid::new_v4(), "test").unwrap();
+        assert_eq!(parse(&launched).unwrap()["flags"]["enable_quic_proxy"].as_bool(), Some(false));
+        assert!(!fields("dhcp = true\n").latency_first);
+        assert!(fields(&default_toml()).latency_first);
+        assert!(patch("flags = 1\n", None).is_err());
+    }
 }
