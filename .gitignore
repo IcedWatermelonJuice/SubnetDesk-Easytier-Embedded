@@ -82,3 +82,42 @@ res/pkg/
 # Native Sciter UI acceptance evidence
 !docs/win7/screenshots/*.png
 !src/ui/icons/*.svg
+
+# 本地构建、调试、运行数据及发布产物；源码和 Cargo.lock 仍须提交。
+/.tmp/
+/.codex/
+/dist/
+/releases/
+**/target/
+/flutter/build/
+/flutter/.dart_tool/
+**/.gradle/
+**/.cxx/
+**/.externalNativeBuild/
+userdata/
+__pycache__/
+*.py[cod]
+*.log
+*.apk
+*.aab
+*.apks
+*.zip
+*.dll
+*.so
+*.dylib
+*.obj
+*.o
+*.lib
+*.a
+
+# 本机 SDK 路径、环境变量和签名凭据。
+**/local.properties
+**/key.properties
+**/keystore.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+.env.*
+!.env.example
+!.env.sample

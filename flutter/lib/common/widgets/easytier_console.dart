@@ -618,6 +618,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
   late final TextEditingController _name, _network, _secret, _peers, _ipv4, _toml;
   final _fieldsChanged = <String>{};
   late bool _dhcp;
+  late bool _latencyFirst;
   bool _tomlTab = false;
   bool _tomlChanged = false;
   bool _saving = false;
@@ -639,6 +640,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
     _ipv4 = TextEditingController(text: _string(existing['ipv4']));
     _toml = TextEditingController(text: _string(widget.profile?['toml']));
     _dhcp = existing['dhcp'] != false;
+    _latencyFirst = widget.profile == null || existing['latency_first'] == true;
   }
 
   @override
@@ -662,6 +664,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
         'peers': _peers.text.split(RegExp(r'[,\r\n]+'))
             .map((peer) => peer.trim()).where((peer) => peer.isNotEmpty).toList(),
       if (_fieldsChanged.contains('dhcp')) 'dhcp': _dhcp,
+      if (_fieldsChanged.contains('latency_first')) 'latency_first': _latencyFirst,
       if (_fieldsChanged.contains('ipv4')) 'ipv4': _ipv4.text.trim(),
     };
     final id = widget.profile?['id'];
@@ -816,7 +819,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white12 : const Color(0xFFE1E6EE)),
                 ),
-                child: SwitchListTile.adaptive(
+                child: Material(color: Colors.transparent, child: SwitchListTile.adaptive(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                 secondary: const Icon(Icons.auto_awesome_outlined, size: 20),
                 title: Text(t('自动分配虚拟 IP', 'Assign virtual IP automatically')),
@@ -826,8 +829,20 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                   _dhcp = value;
                   _fieldsChanged.add('dhcp');
                 }),
-              )),
+              ))),
               if (!_dhcp) _field('ipv4', _ipv4, t('固定虚拟 IPv4', 'Static virtual IPv4')),
+              SwitchListTile.adaptive(
+                key: const ValueKey('easytier-latency-first'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                secondary: const Icon(Icons.speed_rounded, size: 20),
+                title: Text(t('延迟优先', 'Prefer lower latency')),
+                subtitle: Text(t('优先选择低延迟路径，保存后重启组网生效。', 'Prefer lower latency paths. Restart the network after saving to apply.')),
+                value: _latencyFirst,
+                onChanged: _saving ? null : (value) => setState(() {
+                  _latencyFirst = value;
+                  _fieldsChanged.add('latency_first');
+                }),
+              ),
             ],
             if (_error != null)
               Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),

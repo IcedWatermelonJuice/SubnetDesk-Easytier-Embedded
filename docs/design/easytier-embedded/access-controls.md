@@ -17,6 +17,12 @@
 
 该开关不代替「可被远程」，不自动开启远控接收，也不绕过用户名、密码、设备身份和权限检查。
 
+## RC9 方案选项与代理兼容
+
+- 方案编辑器提供“延迟优先”开关，对应 `[flags].latency_first`；新建方案默认开启，已有及导入方案按实际值回显，保存后重启当前组网应用。
+- Windows 和 Android 在保存及启动方案时统一强制 `disable_quic_input = true`、`disable_kcp_input = true`、`enable_quic_proxy = false`、`enable_kcp_proxy = false`，不以是否勾选“仅允许 EasyTier 远控”为条件。旧存储方案在启动时同样覆盖，无需重新导入。
+- 原因：QUIC／KCP TCP 加速代理会在被控端重建 TCP 连接，远控入口可能只看到被控端自身 IP，无法使用现有来源白名单识别原始节点。保留普通 QUIC 隧道，不把本机地址或整个虚拟网段加入允许来源。
+- Android 另保持 `proxy_forward_by_system = false`、`no_tun = false`、`enable_udp_broadcast_relay = false`；运行时 `bind_device = false`。`accept_dns = true` 仍明确拒绝。
 ## 来源 IP 检查
 
 - 在现有远控监听入口复用来源检查；启用时只允许受管 EasyTier 实例返回的节点虚拟 IPv4。
