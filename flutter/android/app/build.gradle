@@ -85,6 +85,7 @@ android {
     // Keep the established Kotlin namespace while publishing under the SubnetDesk application ID.
     namespace "com.carriez.flutter_hbb"
     compileSdkVersion flutter.compileSdkVersion
+    ndkVersion flutter.ndkVersion
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
 

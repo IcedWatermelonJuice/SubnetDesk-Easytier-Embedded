@@ -45,7 +45,7 @@ class _Profiles extends ChangeNotifier implements EasyTierController {
   @override
   List<Map<String, dynamic>> get routes => [];
   @override
-  Map<String, dynamic>? readProfile(String id) => {
+  Future<Map<String, dynamic>?> readProfile(String id) async => {
     'id': id,
     'name': 'sample',
     'toml': '[flags]\nlatency_first = $latencyFirst\n',

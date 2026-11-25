@@ -4,11 +4,14 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:path/path.dart' as path;
 
 import 'subnet_ui.dart';
 import 'easytier_network_cards.dart';
+import 'easytier_android.dart';
 
 typedef _Entry = Map<String, dynamic>;
 
@@ -30,6 +33,11 @@ String? easyTierNodeIp(Map<String, dynamic> node) {
 }
 
 class EasyTierController extends ChangeNotifier {
+  final EasyTierAndroidBridge? _android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+      ? EasyTierAndroidBridge() : null;
+  bool _readingAndroid = false;
+  String _androidHostname = '';
+  DateTime? _hostnameReadAt;
   _Entry _status = const {};
   String? _lastSnapshot;
   late final Timer _poller;
@@ -40,12 +48,14 @@ class EasyTierController extends ChangeNotifier {
   Completer<bool>? _completion;
   String lastCommandError = '';
   bool refreshVisible = false;
+  bool get usesAndroidService => _android != null;
 
   EasyTierController() {
     readStatus();
     _poller = Timer.periodic(const Duration(seconds: 1), (_) {
-      readStatus();
-      if (++_ticks % 5 == 0 && refreshVisible && state == 'running' && !busy) {
+      ++_ticks;
+      if (_android == null || busy || startingOrStopping || refreshVisible || _ticks % 5 == 0) readStatus();
+      if (_ticks % 5 == 0 && refreshVisible && state == 'running' && !busy) {
         unawaited(_refresh());
       }
     });
@@ -53,6 +63,10 @@ class EasyTierController extends ChangeNotifier {
 
   Future<void> _refresh() async {
     try {
+      if (_android case final android?) {
+        _applyStatus(await android.command({'action': 'refresh'}));
+        return;
+      }
       await bind.mainSetLocalOption(
         key: 'easytier-command',
         value: '{"action":"refresh"}',
@@ -95,30 +109,78 @@ class EasyTierController extends ChangeNotifier {
 
   void readStatus() {
     if (_disposed) return;
+    if (_android != null) {
+      unawaited(_readAndroidStatus());
+      return;
+    }
     try {
       final raw = bind.mainGetLocalOption(key: 'easytier-status');
-      if (raw == _lastSnapshot) return;
-      final decoded = jsonDecode(raw);
-      _status = decoded is _Entry ? decoded : const {};
-      _lastSnapshot = raw;
-      final completion = _completion;
-      if (completion != null &&
-          !completion.isCompleted &&
-          _status['completed_request_id'] == _requestId) {
-        lastCommandError = _string(_status['command_error']);
-        completion.complete(lastCommandError.isEmpty);
-      }
+      _applyStatus(raw);
     } catch (_) {
       if (_status.isEmpty && _lastSnapshot == null) return;
       _status = const {};
       _lastSnapshot = null;
+      notifyListeners();
+    }
+  }
+
+  void _applyStatus(String raw) {
+    final snapshotKey = _android == null ? raw : '$raw\u0000$_androidHostname';
+    if (_disposed || snapshotKey == _lastSnapshot) return;
+    final decoded = jsonDecode(raw);
+    if (decoded is! _Entry) throw const FormatException('Invalid EasyTier status');
+    if (_android != null &&
+        (decoded['state'] is! String || decoded['remote_only'] is! bool)) {
+      throw const FormatException('Incomplete Android EasyTier status');
+    }
+    if (_android != null && _string(decoded['running_id']).isNotEmpty &&
+        _androidHostname.isNotEmpty && _string(decoded['running_hostname']).isNotEmpty &&
+        decoded['running_hostname'] != _androidHostname) {
+      decoded['running_config_changed'] = true;
+    }
+    _status = decoded;
+    _lastSnapshot = snapshotKey;
+    final completion = _completion;
+    if (completion != null && !completion.isCompleted &&
+        _status['completed_request_id'] == _requestId) {
+      lastCommandError = _string(_status['command_error']);
+      completion.complete(lastCommandError.isEmpty);
     }
     notifyListeners();
   }
 
-  _Entry? readProfile(String id) {
+  Future<void> _readAndroidStatus() async {
+    if (_readingAndroid || _disposed) return;
+    _readingAndroid = true;
     try {
-      final profile = jsonDecode(bind.mainGetLocalOption(key: 'easytier-profile:$id'));
+      if (_hostnameReadAt == null || DateTime.now().difference(_hostnameReadAt!) >= const Duration(seconds: 5)) {
+        _androidHostname = await _hostname();
+        _hostnameReadAt = DateTime.now();
+      }
+      _applyStatus(await _android!.status());
+    } on PlatformException catch (error) {
+      _androidUnavailable(error.message ?? 'Android EasyTier 服务暂不可用。');
+    } catch (_) {
+      _androidUnavailable('无法读取 Android EasyTier 状态。');
+    } finally {
+      _readingAndroid = false;
+    }
+  }
+
+  void _androidUnavailable(String message) {
+    if (_disposed) return;
+    _status = {..._status, 'available': false, 'state': 'failed',
+      'nodes': <_Entry>[], 'routes': <_Entry>[], 'error': message};
+    _lastSnapshot = null;
+    notifyListeners();
+  }
+
+  Future<_Entry?> readProfile(String id) async {
+    try {
+      final raw = _android == null
+          ? bind.mainGetLocalOption(key: 'easytier-profile:$id')
+          : await _android!.readProfile(id);
+      final profile = jsonDecode(raw);
       if (profile is _Entry && profile['id'] == id) return profile;
     } catch (_) {
       // 配置可能含密钥，不记录底层返回值。
@@ -126,9 +188,21 @@ class EasyTierController extends ChangeNotifier {
     return null;
   }
 
+  Future<String> _hostname() async {
+    try {
+      final info = jsonDecode(await bind.mainGetLanServerInfo());
+      if (info is _Entry) return _string(info['device_name']);
+    } catch (_) {
+      // 原生侧会保留有效默认名称，不把读取失败伪装成空名称配置。
+    }
+    return '';
+  }
+
   Future<bool> command(String action, [Map<String, Object?> arguments = const {}]) async {
     final canDisable = action == 'stop' || (action == 'set_remote_only' && arguments['enabled'] == false);
-    if (busy || (!available && !canDisable) || _disposed) return false;
+    final requiresEngine = _android == null || action == 'start' ||
+        (action == 'set_remote_only' && arguments['enabled'] == true);
+    if (busy || (!available && !canDisable && requiresEngine) || _disposed) return false;
     busy = true;
     commandFailed = false;
     lastCommandError = '';
@@ -138,10 +212,25 @@ class EasyTierController extends ChangeNotifier {
     _completion = completion;
     notifyListeners();
     try {
-      await bind.mainSetLocalOption(
-        key: 'easytier-command',
-        value: jsonEncode({'action': action, ...arguments, 'request_id': requestId}),
-      );
+      final request = <String, Object?>{'action': action, ...arguments, 'request_id': requestId};
+      if (_android case final android?) {
+        if (action == 'start' || (action == 'set_remote_only' && arguments['enabled'] == true)) {
+          final name = await _hostname();
+          if (name.isNotEmpty) {
+            _androidHostname = name;
+            _hostnameReadAt = DateTime.now();
+            request['hostname'] = name;
+          }
+        }
+        final raw = switch (action) {
+          'import_android' => await android.importProfile(requestId, _string(arguments['name'])),
+          'export_android' => await android.exportProfile(requestId, _string(arguments['id'])),
+          _ => await android.command(request),
+        };
+        _applyStatus(raw);
+      } else {
+        await bind.mainSetLocalOption(key: 'easytier-command', value: jsonEncode(request));
+      }
       if (_disposed) return false;
       readStatus();
       final ok = await completion.future.timeout(
@@ -150,9 +239,20 @@ class EasyTierController extends ChangeNotifier {
       );
       if (_disposed) return false;
       commandFailed = !ok;
+      if (!ok && lastCommandError.isEmpty) lastCommandError = '等待 EasyTier 操作结果超时，请检查当前状态。';
       return ok;
+    } on PlatformException catch (error) {
+      if (!_disposed) {
+        commandFailed = true;
+        lastCommandError = error.code == 'cancelled'
+            ? '操作已取消。' : error.message ?? 'Android EasyTier 操作失败。';
+      }
+      return false;
     } catch (_) {
-      if (!_disposed) commandFailed = true;
+      if (!_disposed) {
+        commandFailed = true;
+        lastCommandError = '无法执行 EasyTier 操作。';
+      }
       return false;
     } finally {
       _completion = null;
@@ -242,7 +342,8 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
   String t(String zh, String en) => _text(context, zh, en);
 
   Future<void> _edit([String? id]) async {
-    final profile = id == null ? null : controller.readProfile(id);
+    final profile = id == null ? null : await controller.readProfile(id);
+    if (!mounted) return;
     if (id != null && profile == null) {
       _notice(t('无法读取方案。', 'Could not read the profile.'));
       return;
@@ -294,6 +395,11 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
 
   Future<void> _import() async {
     try {
+      if (controller.usesAndroidService) {
+        final name = await _chooseName(t('导入方案', 'Import profile'), t('导入的方案', 'Imported profile'));
+        if (mounted && name != null) await controller.command('import_android', {'name': name});
+        return;
+      }
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['toml'],
@@ -322,6 +428,11 @@ class _EasyTierConsoleState extends State<EasyTierConsole> {
       return;
     }
     try {
+      if (controller.usesAndroidService) {
+        final ok = await controller.command('export_android', {'id': profile['id']});
+        if (ok && mounted) _notice(t('已导出配置。', 'Configuration exported.'));
+        return;
+      }
       final file = await FilePicker.saveFile(
         fileName: 'config.toml',
         type: FileType.custom,

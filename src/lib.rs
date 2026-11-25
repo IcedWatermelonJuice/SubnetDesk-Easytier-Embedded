@@ -14,6 +14,8 @@ pub use self::server::*;
 mod client;
 #[cfg(target_os = "android")]
 mod android_credentials;
+#[cfg(target_os = "android")]
+mod android_easytier;
 /// cbindgen:ignore
 pub mod common;
 #[cfg(not(any(target_os = "ios")))]

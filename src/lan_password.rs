@@ -18,6 +18,24 @@ fn entry() -> ResultType<keyring::Entry> {
 }
 
 pub(crate) fn set_credentials(username: &str, password: &[u8]) -> ResultType<()> {
+    #[cfg(target_os = "android")]
+    {
+        hbb_common::lan::validate_password(password)?;
+        let password = std::str::from_utf8(password)?;
+        let previous = crate::android_credentials::load_local_server_credential()?;
+        crate::android_credentials::save_local_server_credential(username, password)?;
+        if let Err(error) = Config::set_lan_credentials(username, password.as_bytes()) {
+            let rollback = match previous {
+                Some((username, password)) => crate::android_credentials::save_local_server_credential(&username, &password),
+                None => crate::android_credentials::delete_local_server_credential(),
+            };
+            if let Err(rollback_error) = rollback {
+                hbb_common::log::error!("无法回滚 Android LAN 安全凭据: {rollback_error}");
+            }
+            return Err(error);
+        }
+        return Ok(());
+    }
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         hbb_common::lan::validate_password(password)?;
@@ -45,7 +63,7 @@ pub(crate) fn set_credentials(username: &str, password: &[u8]) -> ResultType<()>
         }
         Ok(())
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "android")))]
     {
         Config::set_lan_credentials(username, password)?;
         Ok(())
@@ -53,6 +71,18 @@ pub(crate) fn set_credentials(username: &str, password: &[u8]) -> ResultType<()>
 }
 
 pub(crate) fn load() -> ResultType<String> {
+    #[cfg(target_os = "android")]
+    {
+        if Config::lan_credentials_configured() {
+            if let Some((username, password)) = crate::android_credentials::load_local_server_credential()? {
+                if username == Config::get_lan_access_username()
+                    && Config::verify_lan_credentials(&username, password.as_bytes())?
+                {
+                    return Ok(password.to_string());
+                }
+            }
+        }
+    }
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         if !Config::lan_credentials_configured() { return Ok(String::new()); }

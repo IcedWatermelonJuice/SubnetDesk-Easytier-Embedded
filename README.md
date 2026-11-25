@@ -6,6 +6,8 @@ Remote desktop with integrated EasyTier networking. This repository maintains ou
 
 **Current release: 2.0.0-rc9 · build 78** · [简体中文](README.zh-CN.md) · [Download RC9](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc9) · [Report an issue](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues)
 
+The default branch, `easytier-embedded`, is the shared source line for Windows and Android. Platform-specific code and toolchains remain separate; each release tag identifies the source used for both packages. Feature branches are integrated after platform checks.
+
 ## What this branch adds
 
 - Integrated EasyTier profiles: create, edit, duplicate, import/export TOML, select and start a network from the app.

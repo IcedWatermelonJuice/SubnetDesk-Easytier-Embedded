@@ -12,6 +12,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import androidx.annotation.Keep
 
 /** Secrets stay encrypted in noBackupFilesDir; the AES key never leaves AndroidKeyStore. */
 class LanCredentialStore(context: Context) {
@@ -19,6 +20,7 @@ class LanCredentialStore(context: Context) {
 
     companion object {
         private const val KEY_ALIAS = "com.zibochen.subnetdesk.lan-credentials.v1"
+        private const val LOCAL_KEY_ALIAS = "com.zibochen.subnetdesk.lan-server.v1"
         private val lock = Any()
         private val fingerprintPattern = Regex("[0-9a-f]{64}")
     }
@@ -28,13 +30,13 @@ class LanCredentialStore(context: Context) {
         return AtomicFile(File(directory, "$fingerprint.cred"))
     }
 
-    private fun key(create: Boolean): SecretKey {
+    private fun key(create: Boolean, alias: String = KEY_ALIAS): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val existing = store.getKey(KEY_ALIAS, null)
+        val existing = store.getKey(alias, null)
         if (existing is SecretKey) return existing
         check(create) { "Saved credential key is unavailable; forget the credential and reconnect" }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder(KEY_ALIAS,
+            init(KeyGenParameterSpec.Builder(alias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setKeySize(256)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -105,5 +107,47 @@ class LanCredentialStore(context: Context) {
         entries.filter { it.isFile && (it.name.endsWith(".cred") || it.name.endsWith(".cred.bak")) }
             .map { it.name.removeSuffix(".bak").removeSuffix(".cred") }
             .filter { fingerprintPattern.matches(it) }.distinct().sorted()
+    }
+
+    // 本机接收密码与远端设备凭据使用不同条目及密钥，删除最后一个远端密码不会影响本机。
+    @Keep
+    fun loadLocalServerCredential(): String? = synchronized(lock) {
+        val target = AtomicFile(File(directory, "local-server.cred"))
+        if (!target.baseFile.exists() && !File(target.baseFile.path + ".bak").exists()) return@synchronized null
+        val record = JSONObject(String(target.readFully(), Charsets.UTF_8))
+        check(record.getInt("version") == 1) { "Unsupported local credential format" }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(false, LOCAL_KEY_ALIAS), GCMParameterSpec(128, Base64.decode(record.getString("iv"), Base64.NO_WRAP)))
+        cipher.updateAAD("local-server".toByteArray(Charsets.UTF_8))
+        val plaintext = cipher.doFinal(Base64.decode(record.getString("ciphertext"), Base64.NO_WRAP))
+        try { String(plaintext, Charsets.UTF_8) } finally { plaintext.fill(0) }
+    }
+
+    @Keep
+    fun saveLocalServerCredential(username: String, password: String) = synchronized(lock) {
+        require(username.isNotBlank() && password.isNotEmpty()) { "Empty local credential" }
+        check(directory.isDirectory || directory.mkdirs()) { "Cannot create credential directory" }
+        val plaintext = JSONObject().put("username", username).put("password", password).toString().toByteArray(Charsets.UTF_8)
+        require(plaintext.size <= 64 * 1024) { "Local credential is too large" }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val encrypted = try {
+            cipher.init(Cipher.ENCRYPT_MODE, key(true, LOCAL_KEY_ALIAS))
+            cipher.updateAAD("local-server".toByteArray(Charsets.UTF_8))
+            cipher.doFinal(plaintext)
+        } finally { plaintext.fill(0) }
+        val record = JSONObject().put("version", 1).put("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .put("ciphertext", Base64.encodeToString(encrypted, Base64.NO_WRAP)).toString().toByteArray(Charsets.UTF_8)
+        val target = AtomicFile(File(directory, "local-server.cred"))
+        val output = target.startWrite()
+        try { output.write(record); target.finishWrite(output) }
+        catch (error: Exception) { target.failWrite(output); throw error }
+    }
+
+    @Keep
+    fun deleteLocalServerCredential() = synchronized(lock) {
+        val target = AtomicFile(File(directory, "local-server.cred"))
+        target.delete()
+        check(!target.baseFile.exists() && !File(target.baseFile.path + ".bak").exists()) { "Cannot delete local credential" }
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(LOCAL_KEY_ALIAS)
     }
 }

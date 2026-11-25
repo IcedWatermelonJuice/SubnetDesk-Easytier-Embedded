@@ -6,6 +6,8 @@
 
 **当前版本：2.0.0-rc9 · build 78** · [English](README.md) · [下载 RC9](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc9) · [反馈问题](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues)
 
+默认分支 `easytier-embedded` 统一维护 Windows 和 Android 源码；平台代码及工具链分别管理，同一发布标签对应两端安装包。功能分支在完成平台检查后合入主分支。
+
 ## 本分支新增的功能
 
 - 内嵌 EasyTier 方案管理：新建、编辑、复制、TOML 导入导出、切换方案及启动组网。

@@ -334,8 +334,8 @@ class _GeneralState extends State<_General> {
       controller: scrollController,
       children: [
         if (widget.hostOnly) ...[
-          if (!isWeb) service(),
-          if (!isWeb) startup(),
+          if (isDesktop && !isWeb) service(),
+          if (isDesktop && !isWeb) startup(),
           if (!isWeb) hwcodec(),
           if (!isWeb) audio(context),
           if (!isWeb) record(context),
@@ -353,7 +353,7 @@ class _GeneralState extends State<_General> {
             ),
           )),
         ],
-        if (!isWeb)
+        if (isDesktop && !isWeb)
           _Card(
             title: subnetText(context, '配置备份与恢复', 'Configuration backup and restore'),
             children: [const ConfigBackupPanel()],

@@ -157,7 +157,7 @@ class _LanWorkspacePageState extends State<LanWorkspacePage>
       gFFI.favoritePeersModel,
       favoriteGroupModel,
     ]);
-    if (!widget.mobile && isDesktop && !bind.isIncomingOnly()) {
+    if ((isDesktop || isAndroid) && !bind.isIncomingOnly()) {
       _easyTier = EasyTierController();
     }
     _viewUpdates = Listenable.merge([_updates, _easyTier]);
@@ -509,7 +509,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
 
   String t(String zh, String en) => subnetText(context, zh, en);
   bool get _isFavorite => _filter == 1;
-  bool get _showEasyTier => !widget.mobile && widget.easyTier != null;
+  bool get _showEasyTier => widget.easyTier != null;
   Set<String> get _favoriteIds => widget.favorites.map((d) => d.id).toSet();
 
   @override
@@ -1111,13 +1111,19 @@ class _LanWorkspaceState extends State<LanWorkspace> {
   Widget _mobileHome() {
     final device = _continueDevice;
     final theme = Theme.of(context);
-    final peers = _orderedNearby.take(3).toList();
+    final peers = (_homeSource == easyTierDeviceSource
+        ? _easyTierWorkspaceDevices(widget.easyTier)
+        : _homeSource == 1 ? widget.favorites : _orderedNearby).take(3).toList();
     return SingleChildScrollView(
       key: const ValueKey('workspace-mobile-home-scroll'),
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_showEasyTier) ...[
+            _mobileEasyTierControls(),
+            const SizedBox(height: 16),
+          ],
           Material(
             key: const ValueKey('workspace-mobile-connect-card'),
             color: theme.colorScheme.surface,
@@ -1192,27 +1198,32 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  TextButton(
-                    onPressed: () => _navigate(1, filter: 0),
-                    style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                    child: Text(
-                      t('附近的设备', 'Nearby devices'),
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  if (_showEasyTier)
+                    Wrap(spacing: 8, runSpacing: 6, children: [
+                      for (final source in [0, easyTierDeviceSource, 1])
+                        ChoiceChip(
+                          label: Text(source == 0 ? t('附近的设备', 'Nearby devices')
+                              : source == 1 ? t('收藏', 'Favorites') : t('EasyTier 设备', 'EasyTier devices')),
+                          selected: _homeSource == source,
+                          onSelected: (_) => setState(() => _homeSource = source),
+                        ),
+                    ])
+                  else TextButton(
+                      onPressed: () => _navigate(1, filter: 0),
+                      child: Text(t('附近的设备', 'Nearby devices'),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                     ),
-                  ),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TextButton(
-                        onPressed: () => _navigate(1),
+                        onPressed: () => _navigate(1, filter: _homeSource),
                         child: Text(t('查看全部', 'View all')),
                       ),
                       IconButton(
                         tooltip: t('刷新设备', 'Refresh devices'),
-                        onPressed: widget.onRefresh,
+                        onPressed: _homeSource == easyTierDeviceSource
+                            ? () => widget.easyTier?.command('refresh') : widget.onRefresh,
                         icon: const Icon(Icons.refresh_rounded),
                       ),
                     ],
@@ -1223,10 +1234,10 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Text(
-                    t(
-                      '尚未发现设备，可刷新或通过地址连接',
-                      'No devices discovered. Refresh or connect by address.',
-                    ),
+                    _homeSource == easyTierDeviceSource
+                        ? t('启动 EasyTier 后显示可连接的组网设备。', 'Start EasyTier to display network devices.')
+                        : _homeSource == 1 ? t('尚未收藏设备。', 'No favorites yet.')
+                        : t('尚未发现设备，可刷新或通过地址连接', 'No devices discovered. Refresh or connect by address.'),
                     style: TextStyle(color: theme.hintColor),
                   ),
                 )
@@ -1239,6 +1250,51 @@ class _LanWorkspaceState extends State<LanWorkspace> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _mobileEasyTierControls() {
+    final controller = widget.easyTier!;
+    final enabled = !controller.busy && !controller.startingOrStopping;
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Theme.of(context).dividerColor)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        ListTile(
+          leading: const Icon(Icons.hub_outlined),
+          title: const Text('EasyTier'),
+          subtitle: Text(controller.selected == null
+              ? t('请选择组网方案', 'Select a network profile')
+              : controller.profileName(controller.selectedId)),
+          trailing: IconButton(onPressed: () => _navigate(3),
+            tooltip: t('组网设置', 'Network settings'), icon: const Icon(Icons.settings_outlined)),
+        ),
+        SwitchListTile(
+          title: Text(t('快速启动 EasyTier', 'Quick start EasyTier')),
+          value: controller.state == 'running',
+          onChanged: !enabled ? null : (value) async {
+            if (value) {
+              await startSelectedEasyTier(context, controller, openConsole: () => _navigate(3));
+            } else if (!await controller.command('stop') && mounted) {
+              _navigate(3);
+            }
+          },
+        ),
+        SwitchListTile(
+          title: Text(t('仅允许 EasyTier 远控', 'EasyTier remote access only')),
+          subtitle: Text(t('仅接受当前组网节点的来源 IP。', 'Accept source IPs from the current network only.')),
+          value: controller.remoteOnly,
+          onChanged: !enabled ? null : (value) async {
+            if (!await controller.command('set_remote_only', {'enabled': value}) && mounted) _navigate(3);
+          },
+        ),
+        if (controller.error.isNotEmpty || controller.lastCommandError.isNotEmpty)
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Text(controller.lastCommandError.isNotEmpty ? controller.lastCommandError : controller.error,
+              style: TextStyle(color: Theme.of(context).colorScheme.error))),
+      ]),
     );
   }
 
@@ -1861,8 +1917,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
               device,
               key: ValueKey('device-actions-' + device.id),
             ),
-          ] else
-            const Icon(Icons.chevron_right_rounded, size: 20),
+          ] else if (device.isEasyTier)
+            _easyTierLinkAction(context, device, _fillEasyTierIp)
+          else const Icon(Icons.chevron_right_rounded, size: 20),
         ],
       ),
     ),
@@ -1870,7 +1927,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
 
   List<WorkspaceDevice> get _listedDevices {
     final map = <String, WorkspaceDevice>{};
-    final source = _isFavorite
+    final source = _filter == easyTierDeviceSource
+        ? _easyTierWorkspaceDevices(widget.easyTier)
+        : _isFavorite
         ? widget.favorites
         : _filter == 0
         ? _orderedNearby
@@ -1937,6 +1996,22 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (widget.mobile)
+                            Padding(padding: const EdgeInsets.only(bottom: 12),
+                              child: Wrap(spacing: 8, runSpacing: 6, children: [
+                                for (final source in [0, if (_showEasyTier) easyTierDeviceSource, 1, 3, 2])
+                                  ChoiceChip(
+                                    label: Text(switch (source) {
+                                      0 => t('附近设备', 'Nearby'),
+                                      1 => t('收藏', 'Favorites'),
+                                      3 => t('最近连接', 'Recent'),
+                                      easyTierDeviceSource => t('EasyTier', 'EasyTier'),
+                                      _ => t('全部', 'All'),
+                                    }),
+                                    selected: _filter == source,
+                                    onSelected: (_) => setState(() => _filter = source),
+                                  ),
+                              ])),
                           if (!widget.mobile)
                             Wrap(
                               spacing: 12,
@@ -1964,7 +2039,8 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                                   crossAxisAlignment: WrapCrossAlignment.center,
                                   children: [
                                     Text(
-                                      _isFavorite
+                                      _filter == easyTierDeviceSource
+                                          ? t('EasyTier 设备', 'EasyTier devices') : _isFavorite
                                           ? t('收藏', 'Favorites')
                                           : _filter == 0
                                           ? t('附近的设备', 'Nearby devices')
@@ -1998,7 +2074,8 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                                 Tooltip(
                                   message: t('刷新设备', 'Refresh devices'),
                                   child: TextButton.icon(
-                                    onPressed: widget.onRefresh,
+                                    onPressed: _filter == easyTierDeviceSource
+                                        ? () => widget.easyTier?.command('refresh') : widget.onRefresh,
                                     icon: const Icon(Icons.refresh_rounded),
                                     label: Text(t('刷新', 'Refresh')),
                                   ),
@@ -2006,7 +2083,8 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                               else
                                 IconButton(
                                   tooltip: t('刷新设备', 'Refresh devices'),
-                                  onPressed: widget.onRefresh,
+                                  onPressed: _filter == easyTierDeviceSource
+                                      ? () => widget.easyTier?.command('refresh') : widget.onRefresh,
                                   icon: const Icon(Icons.refresh_rounded),
                                 ),
                             ],
@@ -2041,11 +2119,13 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                         hasScrollBody: false,
                         child: Center(
                           child: SubnetEmpty(
-                            icon: _isFavorite
+                            icon: _filter == easyTierDeviceSource ? Icons.hub_outlined : _isFavorite
                                 ? Icons.star_outline_rounded
                                 : Icons.devices_outlined,
                             title: t('这里还没有设备', 'No devices here'),
-                            message: _isFavorite
+                            message: _filter == easyTierDeviceSource
+                                ? t('请先启动 EasyTier，节点获得可用 IP 后会显示在这里。',
+                                    'Start EasyTier; peers appear here after receiving a usable IP.') : _isFavorite
                                 ? widget.mobile
                                       ? t(
                                           '在设备详情中收藏常用设备',
@@ -2060,8 +2140,9 @@ class _LanWorkspaceState extends State<LanWorkspace> {
                                     'Check the local network, or enter an address',
                                   ),
                             action: TextButton(
-                              onPressed: _addDevice,
-                              child: Text(t('通过地址连接', 'Connect by address')),
+                              onPressed: _filter == easyTierDeviceSource ? () => _navigate(3) : _addDevice,
+                              child: Text(_filter == easyTierDeviceSource
+                                  ? t('打开组网页', 'Open network page') : t('通过地址连接', 'Connect by address')),
                             ),
                           ),
                         ),
@@ -2112,6 +2193,7 @@ class _LanWorkspaceState extends State<LanWorkspace> {
   );
 
   Widget _browserDeviceRow(WorkspaceDevice device, {required bool columns}) {
+    if (device.isEasyTier) return _deviceRow(device, dense: true);
     final name = Tooltip(
       message: device.displayName,
       child: Text(

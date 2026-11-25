@@ -48,6 +48,7 @@ class MainActivity : FlutterActivity() {
     private val logTag = "mMainActivity"
     private var mainService: MainService? = null
     private val lanCredentialStore by lazy { LanCredentialStore(applicationContext) }
+    private var easyTierBridge: EasyTierActivityBridge? = null
 
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
@@ -56,6 +57,8 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         FFI.initLanCredentialStore(lanCredentialStore)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        easyTierBridge?.close()
+        easyTierBridge = EasyTierActivityBridge(this, messenger)
         MethodChannel(messenger, "com.zibochen.subnetdesk/lan_credentials",
             StandardMethodCodec.INSTANCE, messenger.makeBackgroundTaskQueue())
             .setMethodCallHandler { call, result ->
@@ -96,6 +99,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        easyTierBridge?.onResume()
         val inputPer = InputService.isOpen
         activity.runOnUiThread {
             flutterMethodChannel?.invokeMethod(
@@ -114,6 +118,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (easyTierBridge?.onActivityResult(requestCode, resultCode, data) == true) return
         if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION && resultCode == RES_FAILED) {
             flutterMethodChannel?.invokeMethod("on_media_projection_canceled", null)
         }
@@ -128,11 +133,18 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        easyTierBridge?.close()
+        easyTierBridge = null
         Log.e(logTag, "onDestroy")
         mainService?.let {
             unbindService(serviceConnection)
         }
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        easyTierBridge?.onPause()
+        super.onPause()
     }
 
     private val serviceConnection = object : ServiceConnection {
