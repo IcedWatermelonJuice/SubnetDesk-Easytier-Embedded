@@ -4,7 +4,7 @@
 
 Remote desktop with integrated EasyTier networking. This repository maintains our own SubnetDesk branch, built on [SubnetDesk](https://github.com/zibo-chen/SubnetDesk) and [RustDesk](https://github.com/rustdesk/rustdesk).
 
-**Current release: 2.0.0-rc9 · build 78** · [简体中文](README.zh-CN.md) · [Download RC9](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc9) · [Report an issue](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues)
+**Current release: 2.0.0-rc10 · build 79** · [简体中文](README.zh-CN.md) · [Download RC10](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc10) · [Report an issue](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues)
 
 The default branch, `easytier-embedded`, is the shared source line for Windows and Android. Platform-specific code and toolchains remain separate; each release tag identifies the source used for both packages. Feature branches are integrated after platform checks.
 
@@ -13,20 +13,22 @@ The default branch, `easytier-embedded`, is the shared source line for Windows a
 - Integrated EasyTier profiles: create, edit, duplicate, import/export TOML, select and start a network from the app.
 - EasyTier device cards with direct/relay paths, next-hop information and latency from the current network snapshot.
 - Quick network startup and **EasyTier remote access only**, accepting current node virtual IPv4 addresses while retaining remote-access authentication and permissions.
-- A **Prefer lower latency** profile switch (`latency_first`). Save and restart the running network to apply changes.
+- A **Prefer lower latency** profile switch (`latency_first`), with matching rounded backgrounds and borders on Windows and Android. Save and restart the running network to apply changes.
+- Windows interactive remote terminals inherit the SubnetDesk host account and privileges, without a UAC token downgrade.
+- Windows privacy mode shows a dark remote-control notice on each local monitor while excluding that overlay from remote capture (Windows 10 2004 or later).
 - Desktop configuration backup/restore and access-credential management, subject to platform support.
 - Android networking through `VpnService`, plus a remote-view rotation menu: 0°, 90°, 180° and 270°.
 
 SubnetDesk connects directly to a reachable host IP/hostname; its default remote-access TCP port is **21118**. It does not require a RustDesk rendezvous server. EasyTier provides the private network and may use its own peers/relays; direct connectivity is not guaranteed.
 
-## RC9 downloads
+## RC10 downloads
 
-| Platform | RC9 package | Notes |
+| Platform | RC10 package | Notes |
 | --- | --- | --- |
 | Windows x64 | Portable ZIP | Unsigned test build. Extract the complete archive and start the top-level `SubnetDesk.exe`. |
 | Android arm64-v8a | APK | Android 7.0/API 24 or later. Test-signed with the same certificate as the previous Android test APK. |
 
-Download packages and `SHA256SUMS` from the [RC9 release](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc9). RC9 is a pre-release. This release does not provide macOS, Linux, Windows ARM64 or other Android ABI packages; inherited source support does not imply that these variants have been built or tested here.
+Download packages and `SHA256SUMS` from the [RC10 release](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc10). RC10 is a pre-release. This release does not provide macOS, Linux, Windows ARM64 or other Android ABI packages; inherited source support does not imply that these variants have been built or tested here.
 
 For Windows upgrades, exit the app from the tray, replace the program files and preserve `userdata/`. For Android, install the APK over the previous test build; VPN permission and any screen-sharing/input permissions are separate.
 
@@ -65,7 +67,7 @@ git clone --recurse-submodules --branch easytier-embedded https://github.com/Ice
 cd SubnetDesk-Easytier-Embedded
 ```
 
-The RC9 builds use Flutter 3.44.1, Rust 1.82 for the main application and Rust 1.95 for the independent Android EasyTier library. Android uses JDK 17, NDK r28c, cargo-ndk 3.1.2, min SDK 24 and compile/target SDK 36. Keep the Flutter SDK expressions in the project; do not raise the minimum SDK just to build the networking library.
+The RC10 builds use Flutter 3.44.1, Rust 1.82 for the main application and Rust 1.95 for the independent Android EasyTier library. Android uses JDK 17, NDK r28c, cargo-ndk 3.1.2, min SDK 24 and compile/target SDK 36. Keep the Flutter SDK expressions in the project; do not raise the minimum SDK just to build the networking library.
 
 After installing platform native dependencies and generating the Flutter/Rust bridge files required by the project, the Windows build entry is:
 
@@ -77,9 +79,9 @@ Android requires the main remote-control library, the separate EasyTier JNI libr
 
 ## Validation and limits
 
-RC9 passed targeted configuration/UI tests and full Windows/Android Release builds. Windows ZIP integrity, file/architecture checks, Android signature verification, native dependency completeness and 16 KiB alignment were checked. A complete real-device remote-control/VPN acceptance pass has not been performed for this build.
+RC10 includes the terminal permission fix, privacy-screen notice and profile-switch styling fix. Release validation covers targeted UI tests, full Windows/Android Release builds, package integrity and version checks, Android signature continuity and 16 KiB alignment. A complete real-device remote-control/VPN acceptance pass, including privacy-screen capture exclusion and disconnect recovery, has not been performed for this build.
 
-Report reproducible issues in [this repository](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues). Include platform, app version and redacted logs; exclude passwords, private keys and EasyTier network secrets. See [RC9 release notes](docs/releases/2.0.0-rc9.md).
+Report reproducible issues in [this repository](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues). Include platform, app version and redacted logs; exclude passwords, private keys and EasyTier network secrets. See [RC10 release notes](docs/releases/2.0.0-rc10.md).
 
 ## Credits and license
 

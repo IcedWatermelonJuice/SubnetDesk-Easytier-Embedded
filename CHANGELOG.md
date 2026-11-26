@@ -2,11 +2,12 @@
 
 All notable SubnetDesk changes are documented in this file.
 
-## [2.0.0-rc10] - 未发布
+## [2.0.0-rc10] - 2026-11-27
 
 - 修复 Windows 交互宿主远程终端的令牌获取错误：终端直接通过 ConPTY 启动 Shell，继承 SubnetDesk 宿主身份与权限，移除强制获取 UAC 非提升令牌的流程。
 - 修复 EasyTier 编辑方案时“延迟优先”开关缺少背景和圆角边框的问题，统一手机与 Windows 的表单样式，并适配深色主题。
-- 本节持续积累 rc10 更新；版本号与安装包在集中发布时统一更新。
+- Windows 隐私屏由纯黑遮罩改为深色提示画面，显示正在远程控制和隐私模式说明；每块显示器分别居中，并按显示器缩放调整字号，保留采集排除和断线恢复机制。
+- 统一 Windows 和 Android 应用版本为 `2.0.0-rc10`、Flutter build `79`，沿用 `rc10` 标签发布 Windows x64 便携包和 Android arm64 测试 APK。
 
 ## [2.0.0-rc8] - 2026-11-22
 

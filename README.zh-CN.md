@@ -4,7 +4,7 @@
 
 把 EasyTier 组网集成到远程桌面应用中。本仓库是我们独立维护的 SubnetDesk 分支，基于 [SubnetDesk](https://github.com/zibo-chen/SubnetDesk) 和 [RustDesk](https://github.com/rustdesk/rustdesk)。
 
-**当前版本：2.0.0-rc9 · build 78** · [English](README.md) · [下载 RC9](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc9) · [反馈问题](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues)
+**当前版本：2.0.0-rc10 · build 79** · [English](README.md) · [下载 RC10](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc10) · [反馈问题](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues)
 
 默认分支 `easytier-embedded` 统一维护 Windows 和 Android 源码；平台代码及工具链分别管理，同一发布标签对应两端安装包。功能分支在完成平台检查后合入主分支。
 
@@ -19,14 +19,20 @@
 
 SubnetDesk 使用可达的 IP／主机名直接连接，默认远控 TCP 端口为 **21118**，不依赖 RustDesk 信令服务器。EasyTier 负责建立私有网络，可使用其自身的节点／中继；不保证所有网络环境都能直连。
 
-## RC9 下载
+## RC10 更新
+
+- Windows 远程终端直接继承 SubnetDesk 宿主身份与权限，修复强制获取 UAC 非提升令牌导致无法打开终端的问题。管理员宿主对应管理员终端。
+- Windows 隐私模式由纯黑遮罩改为“此电脑正在被远程控制”提示画面，每块显示器分别居中并适配缩放，沿用现有采集排除和断线恢复机制。该路径要求 Windows 10 2004 或更新版本。
+- 手机和 Windows 的 EasyTier 方案编辑器补齐“延迟优先”开关的圆角背景及边框，适配深色主题。
+
+## RC10 下载
 
 | 平台 | 本次产物 | 说明 |
 | --- | --- | --- |
 | Windows x64 | 便携 ZIP | 未签名测试版。完整解压后启动顶层 `SubnetDesk.exe`。 |
 | Android arm64-v8a | APK | Android 7.0／API 24 及以上；沿用上一版 Android 测试 APK 的证书。 |
 
-安装包及 `SHA256SUMS` 见 [RC9 Release](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc9)。RC9 是预发布版本。本次没有提供 macOS、Linux、Windows ARM64 或其他 Android ABI 的安装包；继承的源码支持不代表这些变体已经在本分支构建或实测。
+安装包及 `SHA256SUMS` 见 [RC10 Release](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/releases/tag/rc10)。RC10 是预发布版本。本次没有提供 macOS、Linux、Windows ARM64 或其他 Android ABI 的安装包；继承的源码支持不代表这些变体已经在本分支构建或实测。
 
 Windows 升级时先从托盘退出应用，再替换程序文件，保留 `userdata/`。Android 可覆盖安装上一版同证书测试包；VPN 授权与被控所需的屏幕共享／输入权限分别管理。
 
@@ -65,7 +71,7 @@ git clone --recurse-submodules --branch easytier-embedded https://github.com/Ice
 cd SubnetDesk-Easytier-Embedded
 ```
 
-RC9 使用 Flutter 3.44.1；主应用使用 Rust 1.82，独立 Android EasyTier 库使用 Rust 1.95。Android 使用 JDK 17、NDK r28c、cargo-ndk 3.1.2，min SDK 24、compile／target SDK 36。保留工程中的 Flutter SDK 表达式，不要为了组网库擅自提高最低系统版本。
+RC10 使用 Flutter 3.44.1；主应用使用 Rust 1.82，独立 Android EasyTier 库使用 Rust 1.95。Android 使用 JDK 17、NDK r28c、cargo-ndk 3.1.2，min SDK 24、compile／target SDK 36。保留工程中的 Flutter SDK 表达式，不要为了组网库擅自提高最低系统版本。
 
 准备对应平台的原生依赖，并生成工程要求的 Flutter／Rust bridge 文件后，Windows 构建入口为：
 
@@ -77,9 +83,9 @@ Android 打包前必须同时准备主远控库、独立 EasyTier JNI 库和 NDK
 
 ## 验证与限制
 
-RC9 已通过定向配置／界面测试，以及 Windows、Android 完整 Release 构建；已检查 Windows ZIP 完整性和文件／架构、Android 签名、原生库依赖完整性及 16 KiB 对齐。本版本尚未完成完整的真机远控／VPN 验收。
+RC10 已通过定向界面测试，以及 Windows、Android 完整 Release 构建；已检查 Windows ZIP 完整性和文件／架构、Android 签名、原生库依赖完整性及 16 KiB 对齐。本版本尚未完成完整的真机远控／VPN 验收，隐私屏远端采集排除、多屏混合缩放和断线恢复仍需实机确认。
 
-请在 [本仓库 Issues](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues) 提供可复现问题，附平台、应用版本和脱敏日志；不要提交密码、私钥或 EasyTier 网络密钥。版本变更见 [RC9 发布说明](docs/releases/2.0.0-rc9.md)。
+请在 [本仓库 Issues](https://github.com/IcedWatermelonJuice/SubnetDesk-Easytier-Embedded/issues) 提供可复现问题，附平台、应用版本和脱敏日志；不要提交密码、私钥或 EasyTier 网络密钥。版本变更见 [RC10 发布说明](docs/releases/2.0.0-rc10.md)。
 
 ## 致谢与许可证
 

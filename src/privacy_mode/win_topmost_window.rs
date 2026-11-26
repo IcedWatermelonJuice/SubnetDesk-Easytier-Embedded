@@ -15,8 +15,13 @@ use winapi::{
     },
     um::{
         handleapi::CloseHandle,
-        wingdi::{GetStockObject, BLACK_BRUSH},
-        libloaderapi::{GetModuleHandleA, GetProcAddress},
+        wingdi::{
+            CreateFontW, DeleteObject, GetStockObject, SelectObject, SetBkMode, SetTextColor,
+            SetDCBrushColor, BLACK_BRUSH, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+            DC_BRUSH, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DEFAULT_PITCH, FW_NORMAL,
+            FW_SEMIBOLD, OUT_DEFAULT_PRECIS, TRANSPARENT,
+        },
+        libloaderapi::{FreeLibrary, GetModuleHandleA, GetProcAddress, LoadLibraryExA, LOAD_LIBRARY_SEARCH_SYSTEM32},
         memoryapi::{VirtualAllocEx, WriteProcessMemory},
         processthreadsapi::{
             CreateProcessAsUserW, QueueUserAPC, ResumeThread, TerminateProcess,
@@ -420,7 +425,7 @@ fn start_native_privacy_window() -> ResultType<u64> {
                 std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null_mut(),
             );
             if hwnd.is_null() { bail!("无法创建隐私屏窗口：{}", Error::last_os_error()); }
-            // 先确认排除屏幕采集成功，再允许黑窗显示；失败时不遮挡屏幕。
+            // 先确认排除屏幕采集成功，再允许隐私提示窗显示；失败时不遮挡屏幕。
             if FALSE == SetWindowDisplayAffinity(hwnd, 0x00000011) {
                 let error = Error::last_os_error();
                 DestroyWindow(hwnd);
@@ -450,12 +455,17 @@ fn start_native_privacy_window() -> ResultType<u64> {
 
 unsafe extern "system" fn native_privacy_window_proc(hwnd: HWND, message: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match message {
-        WM_RUSTDESK_SHOW_WINDOWS | WM_DISPLAYCHANGE => {
+        WM_RUSTDESK_SHOW_WINDOWS | WM_DISPLAYCHANGE | WM_DPICHANGED => {
             SetWindowPos(hwnd, HWND_TOPMOST,
                 GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
                 GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
                 SWP_NOACTIVATE);
             if message == WM_RUSTDESK_SHOW_WINDOWS { ShowWindow(hwnd, SW_SHOWNOACTIVATE); }
+            InvalidateRect(hwnd, std::ptr::null(), FALSE);
+            0
+        },
+        WM_PAINT => {
+            paint_native_privacy_window(hwnd);
             0
         },
         WM_RUSTDESK_HIDE_WINDOWS => { ShowWindow(hwnd, SW_HIDE); 0 },
@@ -463,6 +473,109 @@ unsafe extern "system" fn native_privacy_window_proc(hwnd: HWND, message: UINT, 
         WM_DESTROY => { PostQuitMessage(0); 0 },
         _ => DefWindowProcA(hwnd, message, wparam, lparam),
     }
+}
+
+// 在同一个采集排除窗口内绘制，每块显示器分别居中，避免提示跨越屏幕边界。
+unsafe fn paint_native_privacy_window(hwnd: HWND) {
+    let mut paint: PAINTSTRUCT = std::mem::zeroed();
+    let hdc = BeginPaint(hwnd, &mut paint);
+    if hdc.is_null() {
+        log::warn!("无法绘制隐私屏：{}", Error::last_os_error());
+        return;
+    }
+    let mut client: RECT = std::mem::zeroed();
+    if GetClientRect(hwnd, &mut client) == FALSE {
+        log::warn!("无法获取隐私屏绘制区域：{}", Error::last_os_error());
+        EndPaint(hwnd, &paint);
+        return;
+    }
+    SetDCBrushColor(hdc, 0x00221C18);
+    FillRect(hdc, &client, GetStockObject(DC_BRUSH as _) as HBRUSH);
+    SetBkMode(hdc, TRANSPARENT as _);
+
+    let mut window: RECT = std::mem::zeroed();
+    if GetWindowRect(hwnd, &mut window) == FALSE {
+        log::warn!("无法获取隐私屏窗口位置：{}", Error::last_os_error());
+        EndPaint(hwnd, &paint);
+        return;
+    }
+    let monitors = match get_monitor_rects() {
+        Ok(rects) if !rects.is_empty() => rects,
+        result => {
+            if let Err(error) = result {
+                log::warn!("无法获取隐私屏显示器布局：{error}");
+            }
+            vec![window]
+        }
+    };
+    for monitor in monitors {
+        let hmonitor = MonitorFromRect(&monitor, MONITOR_DEFAULTTONEAREST);
+        let dpi_y = privacy_monitor_dpi(hmonitor);
+        // 在小屏幕上缩小字号，长说明允许自动换行。
+        let scale = (dpi_y as f32 / 96.0)
+            .min((monitor.right - monitor.left) as f32 / 560.0)
+            .min((monitor.bottom - monitor.top) as f32 / 320.0)
+            .max(0.5);
+        let center_y = (monitor.top + monitor.bottom) / 2 - window.top;
+        let margin = (24.0 * scale) as i32;
+        let left = monitor.left - window.left + margin;
+        let right = monitor.right - window.left - margin;
+        for (text, size, weight, color, top, bottom) in [
+            ("SubnetDesk", 18.0, FW_NORMAL, 0x00C9B6A7, -106.0, -70.0),
+            ("此电脑正在被远程控制", 30.0, FW_SEMIBOLD, 0x00F8F5F2, -48.0, 8.0),
+            ("隐私模式已开启，本机屏幕内容暂时隐藏。\n远程会话结束或关闭隐私模式后恢复显示。", 16.0, FW_NORMAL, 0x00C9B6A7, 32.0, 116.0),
+        ] {
+            let mut rect = RECT {
+                left, right,
+                top: center_y + (top * scale) as i32,
+                bottom: center_y + (bottom * scale) as i32,
+            };
+            draw_privacy_text(hdc, text, &mut rect, (size * scale) as i32, weight, color);
+        }
+    }
+    EndPaint(hwnd, &paint);
+}
+
+unsafe fn draw_privacy_text(hdc: HDC, text: &str, rect: &mut RECT, height: i32, weight: i32, color: u32) {
+    let face: Vec<u16> = "Microsoft YaHei UI\0".encode_utf16().collect();
+    let font = CreateFontW(-height, 0, 0, 0, weight, 0, 0, 0,
+        DEFAULT_CHARSET as _, OUT_DEFAULT_PRECIS as _, CLIP_DEFAULT_PRECIS as _,
+        CLEARTYPE_QUALITY as _, DEFAULT_PITCH as _, face.as_ptr());
+    if font.is_null() {
+        log::warn!("无法创建隐私屏字体，使用系统字体：{}", Error::last_os_error());
+    }
+    let selected_font = if font.is_null() { GetStockObject(DEFAULT_GUI_FONT as _) } else { font as _ };
+    let previous = SelectObject(hdc, selected_font);
+    SetTextColor(hdc, color);
+    let text: Vec<u16> = text.encode_utf16().collect();
+    DrawTextW(hdc, text.as_ptr(), text.len() as i32, rect, DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(hdc, previous);
+    if !font.is_null() { DeleteObject(font as _); }
+}
+
+unsafe fn privacy_monitor_dpi(monitor: HMONITOR) -> u32 {
+    // 隐私提示仅用于 Windows 10，但程序仍需能在 Windows 7 上加载。
+    // 动态查询新系统接口，避免给整个 EXE 增加 Shcore.dll 的静态依赖。
+    let module = LoadLibraryExA(b"shcore.dll\0".as_ptr() as _, std::ptr::null_mut(), LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if module.is_null() {
+        log::warn!("无法加载显示器缩放接口，使用默认字号：{}", Error::last_os_error());
+        return 96;
+    }
+    let address = GetProcAddress(module, b"GetDpiForMonitor\0".as_ptr() as _);
+    let mut x = 96;
+    let mut y = 96;
+    if address.is_null() {
+        log::warn!("显示器缩放接口不可用，使用默认字号：{}", Error::last_os_error());
+    } else {
+        let get_dpi: unsafe extern "system" fn(HMONITOR, i32, *mut u32, *mut u32) -> i32 = std::mem::transmute(address);
+        let result = get_dpi(monitor, 0, &mut x, &mut y);
+        if result < 0 || y == 0 {
+            log::warn!("无法读取显示器缩放，使用默认字号：HRESULT={result:#x}");
+            y = 96;
+        }
+    }
+    FreeLibrary(module);
+    y
 }
 
 unsafe fn inject_dll<'a>(hproc: HANDLE, hthread: HANDLE, dll_file: &'a str) -> ResultType<()> {
