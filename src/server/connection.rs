@@ -2973,29 +2973,9 @@ impl Connection {
             return Some("No active console user logged on, please connect and logon first.");
         }
 
-        // 普通终端保持未提升；管理员宿主可使用同一用户的 UAC 非提升令牌。
-        match crate::platform::is_elevated(Some(pid)) {
-            Ok(false) => {
-                self.terminal_user_token = Some(TerminalUserToken::SelfUser);
-                None
-            }
-            Ok(true) => match crate::platform::get_current_user_limited_token() {
-                Ok(token) => {
-                    self.terminal_user_token = Some(TerminalUserToken::CurrentLogonUser(
-                        crate::terminal_service::UserToken::new(token as usize),
-                    ));
-                    None
-                }
-                Err(err) => {
-                    log::warn!("无法获取普通终端的非提升用户令牌：{err}");
-                    Some("Cannot obtain a non-administrator token for the terminal. Enable Windows UAC and sign in with an interactive user.")
-                }
-            },
-            Err(err) => {
-                log::warn!("无法确认普通终端宿主的令牌提升状态：{err}");
-                Some("Cannot verify terminal host privileges. Restart SubnetDesk without administrator rights.")
-            }
-        }
+        // 交互终端继承宿主身份与权限，直接创建 PTY 和 Shell。
+        self.terminal_user_token = Some(TerminalUserToken::SelfUser);
+        None
     }
 
     #[cfg(target_os = "windows")]

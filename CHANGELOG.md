@@ -2,6 +2,12 @@
 
 All notable SubnetDesk changes are documented in this file.
 
+## [2.0.0-rc10] - 未发布
+
+- 修复 Windows 交互宿主远程终端的令牌获取错误：终端直接通过 ConPTY 启动 Shell，继承 SubnetDesk 宿主身份与权限，移除强制获取 UAC 非提升令牌的流程。
+- 修复 EasyTier 编辑方案时“延迟优先”开关缺少背景和圆角边框的问题，统一手机与 Windows 的表单样式，并适配深色主题。
+- 本节持续积累 rc10 更新；版本号与安装包在集中发布时统一更新。
+
 ## [2.0.0-rc8] - 2026-11-22
 
 - 将组网页节点与路由整合为圆角设备卡片，支持手机单列、宽桌面双列、搜索和路径筛选。

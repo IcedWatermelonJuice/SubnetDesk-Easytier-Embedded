@@ -942,7 +942,13 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                 }),
               ))),
               if (!_dhcp) _field('ipv4', _ipv4, t('固定虚拟 IPv4', 'Static virtual IPv4')),
-              SwitchListTile.adaptive(
+              Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF292C33) : const Color(0xFFF7F9FC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white12 : const Color(0xFFE1E6EE)),
+                ),
+                child: Material(color: Colors.transparent, child: SwitchListTile.adaptive(
                 key: const ValueKey('easytier-latency-first'),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                 secondary: const Icon(Icons.speed_rounded, size: 20),
@@ -953,7 +959,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                   _latencyFirst = value;
                   _fieldsChanged.add('latency_first');
                 }),
-              ),
+              ))),
             ],
             if (_error != null)
               Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
